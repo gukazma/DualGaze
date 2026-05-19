@@ -81,6 +81,11 @@ interface MissionsState {
   /** 删除某 face */
   removeFacadeFace: (faceId: string) => void;
   /**
+   * 设置当前选中的 face（同时是模拟飞行 / 单架次导出 / FrustumLayer active highlight 的来源）。
+   * 传 null 取消选中（不会自动跳到下一个，但 effectiveWaypoints 会 fallback 到第一个 enabled face）。
+   */
+  setActiveFaceId: (faceId: string | null) => void;
+  /**
    * React 层（FacadePicker）算完 plane + scanPath 后写回。
    * 因为 store 拿不到 viewer，所以算法在 React 层跑；store 这里只负责落地。
    */
@@ -339,7 +344,10 @@ export const useMissionsStore = create<MissionsState>()(
           };
           updCurrent((m) => {
             if (m.type !== 'facade') return m;
-            return { ...m, facadeFaces: [...(m.facadeFaces ?? []), face] };
+            const facadeFaces = [...(m.facadeFaces ?? []), face];
+            // 首个 face 自动设为 active；后续新加不抢占（用户可能在编辑别的 face）
+            const activeFaceId = m.activeFaceId ?? face.id;
+            return { ...m, facadeFaces, activeFaceId };
           });
           return id;
         },
@@ -380,7 +388,19 @@ export const useMissionsStore = create<MissionsState>()(
           updCurrent((m) => {
             if (m.type !== 'facade') return m;
             const faces = m.facadeFaces ?? [];
-            return { ...m, facadeFaces: faces.filter((f) => f.id !== faceId) };
+            const nextFaces = faces.filter((f) => f.id !== faceId);
+            // 删的恰好是 active → 跳到剩余第一个；都没了就 null
+            const nextActive =
+              m.activeFaceId === faceId
+                ? (nextFaces[0]?.id ?? null)
+                : (m.activeFaceId ?? null);
+            return { ...m, facadeFaces: nextFaces, activeFaceId: nextActive };
+          }),
+
+        setActiveFaceId: (faceId) =>
+          updCurrent((m) => {
+            if (m.type !== 'facade') return m;
+            return { ...m, activeFaceId: faceId };
           }),
 
         setFaceScanResult: (faceId, plane, scanPath) =>
@@ -415,7 +435,7 @@ export const useMissionsStore = create<MissionsState>()(
     },
     {
       name: 'dualgaze.missions',
-      version: 5,
+      version: 6,
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
         missions: state.missions,

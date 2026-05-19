@@ -87,6 +87,19 @@ export function releaseLocalDirSession(sessionId: string): void {
 }
 
 /**
+ * 判断一个 sessionId 是否还在内存中。
+ *
+ * 用途：刷新页面后 localStorage 里持久化的 mission.tilesetSource.sessionId 引用
+ * 仍在，但内存 Map 已丢失（session 不跨页面生命周期）。此时 TilesetLoaderHost 应
+ * 提前检出，弹明确的 "请重新选择目录" 而不是裸跑 loadTileset 收一个让人困惑的
+ * "加载失败"。
+ */
+export function hasLocalDirSession(sessionId: string): boolean {
+  if (typeof window === 'undefined' || !window.__tilesetSessions) return false;
+  return !!window.__tilesetSessions[sessionId];
+}
+
+/**
  * 从 session 取 File；找不到返回 null。relPath 是相对于 rootDir 的路径
  * （已经剥掉根目录前缀）。
  *

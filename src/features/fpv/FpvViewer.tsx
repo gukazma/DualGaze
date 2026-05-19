@@ -91,7 +91,8 @@ export function FpvViewer() {
     let tileset: Cesium.Cesium3DTileset | null = null;
     loadTileset(v, tilesetSource)
       .then((ts) => {
-        if (cancelled) {
+        // 加载完成时 viewer 可能已被销毁（用户进/退 sim 太快 / 多次切 face）
+        if (cancelled || v.isDestroyed()) {
           unloadTileset(v, ts);
           return;
         }
@@ -110,7 +111,7 @@ export function FpvViewer() {
   useEffect(() => {
     const apply = (): void => {
       const v = viewerRef.current;
-      if (!v) return;
+      if (!v || v.isDestroyed()) return;
       const state = useSimulationStore.getState();
       const d = state.droneState;
       if (!d) return;

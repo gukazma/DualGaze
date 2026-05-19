@@ -15,10 +15,14 @@ import {
   createBlankMission,
   createWaypoint as buildWaypoint,
   DRONE_CATALOG,
+  FACADE_DEFAULTS,
   MAPPING_DEFAULTS,
   MISSION_DEFAULTS,
   PAYLOAD_CATALOG,
   type ExitOnRCLost,
+  type FacadeCorner,
+  type FacadeFace,
+  type FacadeScanParams,
   type FinishAction,
   type FlyToWaylineMode,
   type GlobalCameraAction,
@@ -87,15 +91,20 @@ export async function importKmzToMission(file: File): Promise<KmzImportResult> {
     warnings.push(`未识别的 payloadEnumValue=${payloadEnum}, 回退默认 M3E 相机`);
   }
 
-  // executeHeightMode 在 Folder 里
-  const folder = doc.getElementsByTagName('Folder')[0];
+  // 找所有顶层 Folder（waylines.wpml 里每个 Folder 是一架次）
+  const folders = Array.from(doc.getElementsByTagName('Folder'));
+  const folder = folders[0]; // 第一个用作 mission 级元数据 fallback
   const heightMode = readText(folder, 'wpml:executeHeightMode') as HeightMode | null;
 
-  // 识别 mapping 类型：优先认 <wpml:dualgazeMissionType>，否则看 Polygon
-  const declaredType = readText(folder, 'wpml:dualgazeMissionType') as MissionType | null;
+  // 识别 mission 类型：任意一个 Folder 声明 mapping/facade 都算
+  const declaredType =
+    (folders
+      .map((f) => readText(f, 'wpml:dualgazeMissionType') as MissionType | null)
+      .find((t) => t !== null) as MissionType | null) ?? null;
   const polygon = parsePolygonFromDoc(doc);
   const scanParams = parseScanParamsFromDoc(doc);
-  const isMapping = declaredType === 'mapping' || polygon.length >= 3;
+  const isMapping = declaredType === 'mapping' || (declaredType !== 'facade' && polygon.length >= 3);
+  const isFacade = declaredType === 'facade';
 
   // DualGaze 自定义字段（lossless round-trip）
   const isClosedLoopText = readText(folder, 'wpml:dualgazeIsClosedLoop');
@@ -113,9 +122,10 @@ export async function importKmzToMission(file: File): Promise<KmzImportResult> {
     'm3e-cam';
 
   // 构建 mission
+  const missionType: MissionType = isFacade ? 'facade' : isMapping ? 'mapping' : 'patrol';
   const baseMission = createBlankMission({
     name: deriveMissionName(file.name),
-    type: isMapping ? 'mapping' : 'patrol',
+    type: missionType,
     droneId,
     payloadId,
   });
@@ -137,13 +147,84 @@ export async function importKmzToMission(file: File): Promise<KmzImportResult> {
     mission.scanParams = scanParams ?? { ...MAPPING_DEFAULTS };
   }
 
-  // waypoints
+  if (isFacade) {
+    // facade 多架次：每个顶层 Folder = 1 face，对齐 export 的 N waylineId 结构
+    const faces: FacadeFace[] = [];
+    folders.forEach((fld, fi) => {
+      const faceId = readText(fld, 'wpml:dualgazeFaceId') ?? `face-import-${fi}`;
+      const faceName = readText(fld, 'wpml:dualgazeFaceName') ?? `立面 ${fi + 1}`;
+      const corners = parseFaceCorners(readText(fld, 'wpml:dualgazeFaceCorners'));
+      const params = parseFaceParams(readText(fld, 'wpml:dualgazeFaceParams'));
+      if (corners.length !== 4) {
+        warnings.push(
+          `Face "${faceName}" 缺 4 角点信息（可能是非 DualGaze 来源的 KMZ），plane / scanPath 无法重算，仅保留 waypoints`,
+        );
+      }
+      const facePlacemarks = Array.from(fld.children).filter(
+        (c) => c.tagName === 'Placemark',
+      );
+      const facePath = parseWaypointsFromPlacemarks(
+        facePlacemarks,
+        mission.globalSpeed,
+        mission.globalAction,
+        warnings,
+      );
+      faces.push({
+        id: faceId,
+        name: faceName,
+        corners,
+        plane: undefined, // 由 FacadeScanRecomputeHost 看到有 4 corners 时重算
+        params,
+        scanPath: facePath.length > 0 ? facePath : undefined,
+        enabled: true,
+      });
+    });
+    mission.facadeFaces = faces;
+    mission.activeFaceId = faces[0]?.id ?? null;
+    mission.waypoints = [];
+    mission.updatedAt = Date.now();
+    return { mission, warnings };
+  }
+
+  // patrol / mapping：原逻辑（单 Folder 平铺解析 Placemark）
   const placemarks = Array.from(doc.getElementsByTagName('Placemark'));
-  const waypoints: Waypoint[] = [];
+  const waypoints = parseWaypointsFromPlacemarks(
+    placemarks,
+    mission.globalSpeed,
+    mission.globalAction,
+    warnings,
+  );
+
+  if (isMapping) {
+    mission.waypoints = [];
+    if (mission.polygon && mission.polygon.length >= 3 && mission.scanParams) {
+      mission.scanPath = generateScanPath(mission.polygon, mission.scanParams, {
+        alt: mission.globalHeight,
+        speed: mission.globalSpeed,
+      });
+    } else {
+      mission.scanPath = waypoints;
+    }
+  } else {
+    mission.waypoints = waypoints;
+  }
+  mission.updatedAt = Date.now();
+
+  return { mission, warnings };
+}
+
+/** 共享给 patrol / facade 的 placemark → Waypoint[] 解析。无 wpml:index 的 Placemark（boundary 等）会被自动跳过。 */
+function parseWaypointsFromPlacemarks(
+  placemarks: Element[],
+  globalSpeedFallback: number,
+  globalAction: GlobalCameraAction,
+  warnings: string[],
+): Waypoint[] {
+  const out: Waypoint[] = [];
   for (let i = 0; i < placemarks.length; i++) {
     const pm = placemarks[i];
     const wpIdxText = readText(pm, 'wpml:index');
-    if (wpIdxText === null) continue; // 不是 waypoint placemark（可能是 boundary）
+    if (wpIdxText === null) continue;
     const coordsText = readText(pm, 'coordinates');
     if (!coordsText) {
       warnings.push(`Placemark #${i} 缺 <coordinates>，跳过`);
@@ -157,13 +238,13 @@ export async function importKmzToMission(file: File): Promise<KmzImportResult> {
       continue;
     }
     const alt = readNumber(pm, 'wpml:executeHeight') ?? 0;
-    const speed = readNumber(pm, 'wpml:waypointSpeed') ?? mission.globalSpeed;
+    const speed = readNumber(pm, 'wpml:waypointSpeed') ?? globalSpeedFallback;
     const heading = readNumber(pm, 'wpml:waypointHeadingAngle') ?? 0;
     const pitch = readNumber(pm, 'wpml:waypointGimbalPitchAngle') ?? -25;
     const fov = readNumber(pm, 'wpml:dualgazeFov') ?? 60;
 
     const wp = buildWaypoint({
-      index: waypoints.length,
+      index: out.length,
       lon,
       lat,
       alt,
@@ -172,31 +253,38 @@ export async function importKmzToMission(file: File): Promise<KmzImportResult> {
       pitch,
       fov,
     });
-
-    // 解析 actionGroup
-    wp.actions = parseActionsFromPlacemark(pm, mission.globalAction, warnings);
-    waypoints.push(wp);
+    wp.actions = parseActionsFromPlacemark(pm, globalAction, warnings);
+    out.push(wp);
   }
+  return out;
+}
 
-  if (isMapping) {
-    // mapping 类型：导入的 Placemark 是 scanPath，原 mission.waypoints 留空
-    // 注意：用本机 generateScanPath 重算（保证算法版本一致），不直接信任导入的 scanPath
-    mission.waypoints = [];
-    if (mission.polygon && mission.polygon.length >= 3 && mission.scanParams) {
-      mission.scanPath = generateScanPath(mission.polygon, mission.scanParams, {
-        alt: mission.globalHeight,
-        speed: mission.globalSpeed,
-      });
-    } else {
-      // polygon 不足时把导入的 scanPath waypoints 当成 scanPath 兜底
-      mission.scanPath = waypoints;
-    }
-  } else {
-    mission.waypoints = waypoints;
+/** 解析 face corners 字符串："lon,lat,alt lon,lat,alt ..."（4 个） */
+function parseFaceCorners(text: string | null): FacadeCorner[] {
+  if (!text) return [];
+  return text
+    .trim()
+    .split(/\s+/)
+    .map((triple) => {
+      const [lonStr, latStr, altStr] = triple.split(',');
+      return {
+        lon: parseFloat(lonStr),
+        lat: parseFloat(latStr),
+        alt: parseFloat(altStr ?? '0') || 0,
+      };
+    })
+    .filter((c) => Number.isFinite(c.lon) && Number.isFinite(c.lat));
+}
+
+/** 解析 face params JSON（导出时 stringify FACADE_DEFAULTS shape）—— 失败用默认值 */
+function parseFaceParams(text: string | null): FacadeScanParams {
+  if (!text) return { ...FACADE_DEFAULTS };
+  try {
+    const parsed = JSON.parse(text) as Partial<FacadeScanParams>;
+    return { ...FACADE_DEFAULTS, ...parsed };
+  } catch {
+    return { ...FACADE_DEFAULTS };
   }
-  mission.updatedAt = Date.now();
-
-  return { mission, warnings };
 }
 
 // ===== mapping 辅助 =====

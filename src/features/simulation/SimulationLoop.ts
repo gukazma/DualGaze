@@ -120,16 +120,17 @@ interface Segment {
 export function effectiveWaypoints(mission: Mission): Waypoint[] {
   if (mission.type === 'mapping') return mission.scanPath ?? [];
   if (mission.type === 'facade') {
+    // 对齐 DPGO：1 face = 1 wayline = 1 架次。模拟飞行 / 段时序 / sim 入口 disabled
+    // 判定都基于 activeFaceId 那一面，不再 concat 所有 face。
     const faces = mission.facadeFaces ?? [];
-    const out: Waypoint[] = [];
-    let idx = 0;
-    for (const f of faces) {
-      if (!f.enabled) continue;
-      for (const wp of f.scanPath ?? []) {
-        out.push({ ...wp, index: idx++ });
-      }
-    }
-    return out;
+    if (faces.length === 0) return [];
+    const activeId = mission.activeFaceId ?? null;
+    const active =
+      (activeId ? faces.find((f) => f.id === activeId) : null) ??
+      faces.find((f) => f.enabled !== false) ??
+      faces[0];
+    if (!active || !active.enabled) return [];
+    return (active.scanPath ?? []).map((wp, idx) => ({ ...wp, index: idx }));
   }
   return mission.waypoints;
 }

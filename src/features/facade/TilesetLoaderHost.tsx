@@ -2,9 +2,13 @@ import { useEffect, useRef } from 'react';
 import * as Cesium from 'cesium';
 import { toast } from 'sonner';
 import { useCesiumViewer } from '../cesium/CesiumContext';
-import { useCurrentMission } from '../../store/missions';
+import { useCurrentMission, useMissionsStore } from '../../store/missions';
 import { useTilesetLoadingStore } from '../../store/tileset-loading';
-import { loadTileset, unloadTileset } from '../../lib/tileset-source';
+import {
+  ERR_LOCAL_DIR_SESSION_LOST,
+  loadTileset,
+  unloadTileset,
+} from '../../lib/tileset-source';
 import type { TilesetSource } from '../../types/mission';
 
 /**
@@ -21,6 +25,7 @@ import type { TilesetSource } from '../../types/mission';
 export function TilesetLoaderHost() {
   const viewer = useCesiumViewer();
   const mission = useCurrentMission();
+  const setTilesetSource = useMissionsStore((s) => s.setTilesetSource);
   const tilesetRef = useRef<Cesium.Cesium3DTileset | null>(null);
   const setLoading = useTilesetLoadingStore((s) => s.setLoading);
   const setLoaded = useTilesetLoadingStore((s) => s.setLoaded);
@@ -67,7 +72,20 @@ export function TilesetLoaderHost() {
       })
       .catch((err: unknown) => {
         if (cancelled) return;
+        const code = (err as { code?: string })?.code;
         const msg = err instanceof Error ? err.message : String(err);
+        // localDir session 失效（多半是刷新页面后内存丢了）：
+        //   1. 主动清空 mission.tilesetSource 让 FacadeEmptyGuide 重新出现，提示用户重选目录
+        //   2. 给一个解释性 toast（不重复弹 "加载失败"）
+        if (code === ERR_LOCAL_DIR_SESSION_LOST) {
+          setTilesetSource(undefined);
+          reset();
+          toast.warning('请重新选择本地目录', {
+            description: '页面刷新会丢失内存中的目录句柄，需要重新选',
+            duration: 6000,
+          });
+          return;
+        }
         setError(msg);
         toast.error('3DTileset 加载失败', { description: msg });
       });

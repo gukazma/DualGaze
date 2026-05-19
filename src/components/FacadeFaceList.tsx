@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { Plus, Trash2, Eye, EyeOff, Pencil } from 'lucide-react';
+import { Plus, Trash2, Eye, EyeOff, Pencil, Plane } from 'lucide-react';
 import { ScrollArea } from './ui/scroll-area';
 import { Input } from './ui/input';
 import { useCurrentMission, useMissionsStore } from '../store/missions';
 import { useUiStore } from '../store/ui';
+import { faceCssColor } from '../lib/face-color';
 import { cn } from '../lib/utils';
 
 /**
@@ -17,6 +18,7 @@ export function FacadeFaceList() {
   const mission = useCurrentMission();
   const updateFacadeFace = useMissionsStore((s) => s.updateFacadeFace);
   const removeFacadeFace = useMissionsStore((s) => s.removeFacadeFace);
+  const setActiveFaceId = useMissionsStore((s) => s.setActiveFaceId);
   const setTilesetSource = useMissionsStore((s) => s.setTilesetSource);
   const pickerMode = useUiStore((s) => s.pickerMode);
   const setPickerMode = useUiStore((s) => s.setPickerMode);
@@ -27,6 +29,7 @@ export function FacadeFaceList() {
   if (!mission || mission.type !== 'facade') return null;
   const faces = mission.facadeFaces ?? [];
   const hasTileset = !!mission.tilesetSource;
+  const activeId = mission.activeFaceId ?? null;
 
   const commitFacadePreviewIfAny = useMissionsStore((s) => s.commitFacadePreviewIfAny);
   const startNew = (): void => {
@@ -58,13 +61,20 @@ export function FacadeFaceList() {
             </div>
           ) : (
             faces.map((f, idx) => {
-              const hue = `hsl(${(idx * 60) % 360}, 70%, 55%)`;
+              const hue = faceCssColor(idx);
               const isEditing = editingId === f.id;
+              const isActive = activeId === f.id;
               return (
                 <div
                   key={f.id}
+                  onClick={() => {
+                    if (!isEditing) setActiveFaceId(f.id);
+                  }}
                   className={cn(
-                    'flex items-center gap-2 rounded-md border border-border bg-bg-input p-2',
+                    'flex cursor-pointer items-center gap-2 rounded-md border p-2 transition-colors',
+                    isActive
+                      ? 'border-accent bg-accent/10 ring-1 ring-accent/40'
+                      : 'border-border bg-bg-input hover:border-border-subtle hover:bg-bg-panel',
                     !f.enabled && 'opacity-50',
                   )}
                 >
@@ -79,6 +89,7 @@ export function FacadeFaceList() {
                         value={editName}
                         onChange={(e) => setEditName(e.target.value)}
                         onBlur={() => commitName(f.id)}
+                        onClick={(e) => e.stopPropagation()}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') commitName(f.id);
                           if (e.key === 'Escape') setEditingId(null);
@@ -88,14 +99,22 @@ export function FacadeFaceList() {
                     ) : (
                       <button
                         type="button"
-                        onDoubleClick={() => {
+                        onDoubleClick={(e) => {
+                          e.stopPropagation();
                           setEditingId(f.id);
                           setEditName(f.name);
                         }}
-                        className="truncate text-left text-[12px] font-semibold text-text-primary hover:text-accent"
-                        title="双击改名"
+                        className="flex items-center gap-1.5 truncate text-left text-[12px] font-semibold text-text-primary hover:text-accent"
+                        title="双击改名 · 单击选中为当前架次"
                       >
-                        {f.name}
+                        <span
+                          className="rounded-sm bg-bg-surface px-1 py-0.5 font-mono text-[9px] text-text-muted"
+                          title="DJI Pilot 2 中作为单独架次（wayline）执行"
+                        >
+                          架次 {idx + 1}
+                        </span>
+                        <span className="truncate">{f.name}</span>
+                        {isActive && <Plane className="h-3 w-3 shrink-0 text-accent" />}
                       </button>
                     )}
                     <span className="truncate text-[10px] text-text-muted">
@@ -112,7 +131,10 @@ export function FacadeFaceList() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => updateFacadeFace(f.id, { enabled: !f.enabled })}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      updateFacadeFace(f.id, { enabled: !f.enabled });
+                    }}
                     className="text-text-secondary hover:text-accent"
                     title={f.enabled ? '关闭此立面' : '启用此立面'}
                   >
@@ -120,7 +142,8 @@ export function FacadeFaceList() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
+                    onClick={(e) => {
+                      e.stopPropagation();
                       setEditingId(f.id);
                       setEditName(f.name);
                     }}
@@ -131,7 +154,8 @@ export function FacadeFaceList() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
+                    onClick={(e) => {
+                      e.stopPropagation();
                       if (window.confirm(`删除立面 "${f.name}"？`)) removeFacadeFace(f.id);
                     }}
                     className="text-text-secondary hover:text-accent-danger"

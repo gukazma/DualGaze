@@ -4,6 +4,7 @@ import { useCesiumViewer } from '../cesium/CesiumContext';
 import { useCurrentMission, useMissionsStore } from '../../store/missions';
 import { useFacadePickerStore } from '../../store/facade-picker';
 import { wgs84ToCartesian3 } from '../../lib/coord';
+import { faceColorTriple } from '../../lib/face-color';
 import type {
   FacadeCorner,
   FacadeFace,
@@ -12,25 +13,10 @@ import type {
 } from '../../types/mission';
 
 const COLOR_NORMAL_ARROW = Cesium.Color.fromCssColorString('#7cc78a');
-const COLOR_SCAN_PATH = Cesium.Color.fromCssColorString('#00d2c0');
 const COLOR_PREVIEW_FILL = Cesium.Color.fromCssColorString('#ffd24a').withAlpha(0.18);
 const COLOR_PREVIEW_OUTLINE = Cesium.Color.fromCssColorString('#ffd24a');
 const COLOR_UNSAFE = Cesium.Color.fromCssColorString('#e57373');
-
-/**
- * 每个 face 给一个 hue（HSL hue 旋转 60° 递增）；返回 [outline, fill, vertex] 三套色
- */
-function faceHueColors(idx: number): {
-  outline: Cesium.Color;
-  fill: Cesium.Color;
-  vertex: Cesium.Color;
-} {
-  const hue = (idx * 60) % 360;
-  const outline = Cesium.Color.fromHsl(hue / 360, 0.7, 0.55);
-  const fill = Cesium.Color.fromHsl(hue / 360, 0.7, 0.5, 0.18);
-  const vertex = Cesium.Color.fromHsl(hue / 360, 0.85, 0.6);
-  return { outline, fill, vertex };
-}
+const COLOR_PREVIEW_SCANPATH = Cesium.Color.fromCssColorString('#00d2c0');
 
 function cornerToCart(c: FacadeCorner): Cesium.Cartesian3 {
   return wgs84ToCartesian3(c.lon, c.lat, c.alt);
@@ -128,7 +114,7 @@ export function FacadeLayer() {
     };
 
     faces.forEach((face, idx) => {
-      const hue = faceHueColors(idx);
+      const hue = faceColorTriple(idx);
       const existing = faceEntitiesRef.current.get(face.id);
       if (existing) {
         // 已有 entity，仅在 enabled 变化时调透明度（其它字段 CallbackProperty 自动跟）
@@ -232,7 +218,7 @@ export function FacadeLayer() {
         }),
       );
 
-      // scanPath polyline
+      // scanPath polyline —— 用 face 的 outline 色（不再是全局青）
       list.push(
         ds.entities.add({
           polyline: {
@@ -243,7 +229,7 @@ export function FacadeLayer() {
             }, false),
             width: 2,
             material: new Cesium.PolylineDashMaterialProperty({
-              color: COLOR_SCAN_PATH,
+              color: hue.outline,
               dashLength: 10,
             }),
             arcType: Cesium.ArcType.NONE,
@@ -255,26 +241,27 @@ export function FacadeLayer() {
     });
 
     // 3. 同步采样点（scanPath waypoints）—— face 内 enabled 才显示
-    faces.forEach((face) => {
+    faces.forEach((face, idx) => {
+      const hue = faceColorTriple(idx);
       const samples = sampleEntitiesRef.current.get(face.id) ?? [];
       const path = face.enabled ? face.scanPath ?? [] : [];
       while (samples.length < path.length) {
-        const idx = samples.length;
+        const wpIdx = samples.length;
         const e = ds.entities.add({
           position: new Cesium.CallbackPositionProperty(() => {
             const f = readFace(face.id);
-            const p = f?.scanPath?.[idx];
+            const p = f?.scanPath?.[wpIdx];
             if (!p) return Cesium.Cartesian3.ZERO;
             return waypointToCart(p);
           }, false),
           point: {
             pixelSize: new Cesium.CallbackProperty(() => {
               const f = readFace(face.id);
-              return f?.scanPath?.[idx]?.unsafe ? 7 : 4;
+              return f?.scanPath?.[wpIdx]?.unsafe ? 7 : 4;
             }, false) as unknown as Cesium.Property,
             color: new Cesium.CallbackProperty(() => {
               const f = readFace(face.id);
-              return f?.scanPath?.[idx]?.unsafe ? COLOR_UNSAFE : COLOR_SCAN_PATH;
+              return f?.scanPath?.[wpIdx]?.unsafe ? COLOR_UNSAFE : hue.vertex;
             }, false) as unknown as Cesium.Property,
             outlineColor: Cesium.Color.BLACK,
             outlineWidth: 1,
@@ -395,7 +382,7 @@ export function FacadeLayer() {
               positions: pickerState.scanPath.map(waypointToCart),
               width: 2,
               material: new Cesium.PolylineDashMaterialProperty({
-                color: COLOR_SCAN_PATH,
+                color: COLOR_PREVIEW_SCANPATH,
                 dashLength: 10,
               }),
               arcType: Cesium.ArcType.NONE,
@@ -410,7 +397,7 @@ export function FacadeLayer() {
               position: waypointToCart(wp),
               point: {
                 pixelSize: unsafe ? 7 : 3,
-                color: unsafe ? COLOR_UNSAFE : COLOR_SCAN_PATH,
+                color: unsafe ? COLOR_UNSAFE : COLOR_PREVIEW_SCANPATH,
                 outlineColor: Cesium.Color.BLACK,
                 outlineWidth: 1,
                 disableDepthTestDistance: Number.POSITIVE_INFINITY,

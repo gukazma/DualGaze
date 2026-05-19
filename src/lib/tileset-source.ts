@@ -1,6 +1,9 @@
 import * as Cesium from 'cesium';
-import { getSessionFile } from './tileset-loader-dir';
+import { getSessionFile, hasLocalDirSession } from './tileset-loader-dir';
 import type { TilesetSource } from '../types/mission';
+
+/** 错误码：localDir session 内存中已丢失（多半是刷新页面后） */
+export const ERR_LOCAL_DIR_SESSION_LOST = 'LOCAL_DIR_SESSION_LOST';
 
 /**
  * 加载一个 3DTileset 到 viewer 场景。
@@ -37,11 +40,28 @@ export async function loadTileset(
         'tileset-source: localDir 模式需要 sessionId + rootFile —— 请重新选择目录。',
       );
     }
+    // 内存 session 失效（刷新页面 / 关浏览器后必发生）→ 抛特定错码，UI 用它弹友好提示
+    if (!hasLocalDirSession(sessionId)) {
+      const err = new Error(
+        '本地目录 session 已失效（页面刷新会丢失内存中的目录句柄），请重新选择目录。',
+      );
+      (err as Error & { code?: string }).code = ERR_LOCAL_DIR_SESSION_LOST;
+      throw err;
+    }
     const resource = buildLocalDirResource(sessionId, rootFile);
     const tileset = await Cesium.Cesium3DTileset.fromUrl(resource, {
       maximumScreenSpaceError: 16,
       preloadWhenHidden: false,
     });
+    if (viewer.isDestroyed()) {
+      // 加载过程中 viewer 被销毁（用户中途切了 mission / 退 sim）→ 直接释放，不挂
+      try {
+        tileset.destroy();
+      } catch {
+        // noop
+      }
+      throw new Error('viewer destroyed during tileset load');
+    }
     viewer.scene.primitives.add(tileset);
     await viewer.zoomTo(tileset);
     return tileset;
@@ -228,11 +248,22 @@ function buildLocalDirResource(sessionId: string, rootFile: string): Cesium.Reso
 
 /**
  * 卸载 tileset：从 scene.primitives 移除并销毁。
+ *
+ * 守: viewer 可能已被销毁（async 加载竞速 + sim 退出 / 切 mission 时常见），
+ * 此时直接 destroy tileset 自身就行，不要再访问 viewer.scene。
  */
 export function unloadTileset(
   viewer: Cesium.Viewer,
   tileset: Cesium.Cesium3DTileset,
 ): void {
+  if (viewer.isDestroyed()) {
+    try {
+      if (!tileset.isDestroyed()) tileset.destroy();
+    } catch {
+      // noop
+    }
+    return;
+  }
   if (!viewer.scene.primitives.contains(tileset)) return;
   viewer.scene.primitives.remove(tileset);
   // remove 会自动 destroy()，不需手动调

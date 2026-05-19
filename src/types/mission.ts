@@ -291,6 +291,12 @@ export interface Mission {
   scanParams?: MappingScanParams;
   /** v3 facade 类型：多个立面，每个独立 corners/plane/params/scanPath */
   facadeFaces?: FacadeFace[];
+  /**
+   * v3 facade 类型：当前选中的 face id（同时是模拟飞行 / KMZ 中 "选哪架次飞" 的 active 选择）。
+   * 对齐 DPGO 行为：1 face = 1 wayline = 1 架次；用户一次飞一面，落地换电池再选下一面。
+   * effectiveWaypoints / KMZ 单架次模拟都基于这个字段。null = 没选；UI 默认选第一个 face。
+   */
+  activeFaceId?: string | null;
   /** v3 facade 类型：3DTiles 数据源（HTTP URL 或本地目录 session） */
   tilesetSource?: TilesetSource;
   /** 安全起飞高度 m（执行任务前先爬升到此高度才进入航线，DJI WPML takeOffSecurityHeight） */
@@ -397,6 +403,7 @@ export function createBlankMission(init: {
   }
   if (init.type === 'facade') {
     base.facadeFaces = [];
+    base.activeFaceId = null;
     base.tilesetSource = undefined;
   }
   return base;
@@ -437,6 +444,9 @@ export function migrateMissionToLatest(m: Partial<Mission> & Pick<Mission, 'id' 
         }))
       : [];
     next.tilesetSource = m.tilesetSource;
+    // 旧 mission 没存 activeFaceId → 选第一个有 scanPath 的 face；都没有就 null
+    const firstFaceId = next.facadeFaces?.find((f) => f.enabled !== false)?.id ?? null;
+    next.activeFaceId = m.activeFaceId !== undefined ? m.activeFaceId : firstFaceId;
   }
   return next;
 }

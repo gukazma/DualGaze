@@ -5,11 +5,14 @@
  * 参考 dji_way_line/src/utils/kmzGenerator.js（396 行原版）。
  *
  * 类型分支：
- *   - patrol：用 mission.waypoints 当 Placemark 列表
- *   - mapping：用 scanPath 当飞行航点 + 额外 Placemark 包 polygon boundary +
- *     自定义 <wpml:dualgazeScanParams> 持久化扫描参数
+ *   - patrol：用 mission.waypoints 当 Placemark 列表 → 1 个 Folder
+ *   - mapping：用 scanPath + polygon boundary + dualgazeScanParams → 1 个 Folder
+ *   - facade：**每个 enabled face 一个 Folder**，对齐 DPGO "1 face = 1 wayline = 1 架次"
+ *     模型；DJI Pilot 2 / 智图 打开时把每个 Folder 列成一个独立架次让操作员选。
  *
  * Round-trip 兼容性：所有 MissionConfig 字段都能写入并被 kmz-import 还原。
+ * facade 用 `<wpml:dualgazeFaceId>` / `<wpml:dualgazeFaceName>` 自定义 ns
+ * 保留 face 元信息（id 用于 round-trip 一致）。
  * `isClosedLoop` / `fov` 这两个 DJI 标准没有对应字段的，按默认值还原（lossy）。
  */
 import JSZip from 'jszip';
@@ -23,19 +26,68 @@ import {
   type WaypointAction,
 } from '../types/mission';
 
-/** 飞行航点列表：mapping 用 scanPath，facade 用所有 enabled face 拼接，patrol 用 waypoints */
-function flightWaypoints(mission: Mission): Waypoint[] {
-  if (mission.type === 'mapping') return mission.scanPath ?? [];
-  if (mission.type === 'facade') {
-    const out: Waypoint[] = [];
-    let idx = 0;
-    for (const f of mission.facadeFaces ?? []) {
-      if (!f.enabled) continue;
-      for (const wp of f.scanPath ?? []) out.push({ ...wp, index: idx++ });
-    }
-    return out;
+/**
+ * 一个架次（wayline）。facade mission 一面 = 一架次；其它 mission 整条 = 一架次。
+ * waylineId 是 DJI WPML 用来在 Pilot 2 上区分多架次的唯一 id。
+ */
+interface WaylineSegment {
+  waylineId: number;
+  /** 仅 facade 有；用于 round-trip 还原 facadeFaces[].id */
+  faceId?: string;
+  /** 仅 facade 有；用于 round-trip 还原 facadeFaces[].name */
+  faceName?: string;
+  /** 仅 facade 有；用于 round-trip 还原 face.corners（4 个 wgs84 角点） */
+  faceCorners?: { lon: number; lat: number; alt: number }[];
+  /** 仅 facade 有；用于 round-trip 还原 face.params（FacadeScanParams JSON） */
+  faceParamsJson?: string;
+  waypoints: Waypoint[];
+}
+
+/** 把一个 mission 拆成 N 个 wayline segment（facade N 面 → N 段；其它单段） */
+function buildWaylineSegments(mission: Mission): WaylineSegment[] {
+  if (mission.type === 'mapping') {
+    return [{ waylineId: 0, waypoints: (mission.scanPath ?? []).map(reindex) }];
   }
-  return mission.waypoints;
+  if (mission.type === 'facade') {
+    const faces = (mission.facadeFaces ?? []).filter((f) => f.enabled !== false);
+    if (faces.length === 0) {
+      // 没有任何启用的 face → 仍输出 1 个空段，让 KMZ schema 合法
+      return [{ waylineId: 0, waypoints: [] }];
+    }
+    return faces.map((f, i) => ({
+      waylineId: i,
+      faceId: f.id,
+      faceName: f.name,
+      faceCorners: f.corners.map((c) => ({ lon: c.lon, lat: c.lat, alt: c.alt })),
+      faceParamsJson: JSON.stringify(f.params),
+      waypoints: (f.scanPath ?? []).map(reindex),
+    }));
+  }
+  return [{ waylineId: 0, waypoints: mission.waypoints.map(reindex) }];
+}
+
+function reindex(wp: Waypoint, idx: number): Waypoint {
+  return { ...wp, index: idx };
+}
+
+function xmlEscape(s: string | undefined): string {
+  if (!s) return '';
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/** 给 facade Folder 序列化 face 元数据（id/name/4 角点/params JSON）—— 让 import lossless 还原 */
+function facadeFaceMetaXml(seg: WaylineSegment): string {
+  if (!seg.faceId) return '';
+  const cornersXml =
+    seg.faceCorners && seg.faceCorners.length > 0
+      ? `\n      <wpml:dualgazeFaceCorners>${seg.faceCorners
+          .map((c) => `${c.lon.toFixed(7)},${c.lat.toFixed(7)},${c.alt}`)
+          .join(' ')}</wpml:dualgazeFaceCorners>`
+      : '';
+  const paramsXml = seg.faceParamsJson
+    ? `\n      <wpml:dualgazeFaceParams>${xmlEscape(seg.faceParamsJson)}</wpml:dualgazeFaceParams>`
+    : '';
+  return `\n      <wpml:dualgazeFaceId>${xmlEscape(seg.faceId)}</wpml:dualgazeFaceId>\n      <wpml:dualgazeFaceName>${xmlEscape(seg.faceName)}</wpml:dualgazeFaceName>${cornersXml}${paramsXml}`;
 }
 
 const WPML_NS = 'http://www.dji.com/wpmz/1.0.6';
@@ -56,8 +108,7 @@ function buildTemplateKml(mission: Mission): string {
   const drone = DRONE_CATALOG.find((d) => d.id === mission.droneId);
   const payload = PAYLOAD_CATALOG.find((p) => p.id === mission.payloadId);
   const now = Date.now();
-  const takeOffPointXml = buildTakeOffPointXml(mission);
-  const wps = flightWaypoints(mission);
+  const segs = buildWaylineSegments(mission);
   const isMapping = mission.type === 'mapping';
   const polygonPlacemarkXml = isMapping
     ? buildPolygonPlacemarkXml(mission.polygon ?? [])
@@ -65,6 +116,10 @@ function buildTemplateKml(mission: Mission): string {
   const scanParamsXml = isMapping
     ? buildScanParamsXml(mission.scanParams)
     : '';
+
+  const foldersXml = segs
+    .map((seg) => buildTemplateFolder(mission, seg, polygonPlacemarkXml, scanParamsXml))
+    .join('\n');
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="${KML_NS}" xmlns:wpml="${WPML_NS}">
@@ -90,10 +145,23 @@ function buildTemplateKml(mission: Mission): string {
         <wpml:payloadPositionIndex>${payload?.payloadPositionIndex ?? 0}</wpml:payloadPositionIndex>
       </wpml:payloadInfo>
     </wpml:missionConfig>
-    <Folder>
+${foldersXml}
+  </Document>
+</kml>`;
+}
+
+function buildTemplateFolder(
+  mission: Mission,
+  seg: WaylineSegment,
+  polygonPlacemarkXml: string,
+  scanParamsXml: string,
+): string {
+  const faceMetaXml = facadeFaceMetaXml(seg);
+  const takeOffPointXml = buildTakeOffPointXml(mission, seg);
+  return `    <Folder>
       <wpml:templateType>waypoint</wpml:templateType>
       <wpml:dualgazeMissionType>${mission.type}</wpml:dualgazeMissionType>
-      <wpml:templateId>0</wpml:templateId>
+      <wpml:templateId>${seg.waylineId}</wpml:templateId>${faceMetaXml}
       <wpml:waylineCoordinateSysParam>
         <wpml:coordinateMode>WGS84</wpml:coordinateMode>
         <wpml:heightMode>${mission.heightMode}</wpml:heightMode>
@@ -101,12 +169,10 @@ function buildTemplateKml(mission: Mission): string {
       <wpml:autoFlightSpeed>${mission.globalSpeed}</wpml:autoFlightSpeed>${takeOffPointXml}
       <wpml:globalWaypointTurnMode>toPointAndStopWithDiscontinuityCurvature</wpml:globalWaypointTurnMode>
       <wpml:globalUseStraightLine>1</wpml:globalUseStraightLine>
-${polygonPlacemarkXml}${wps.map((wp, i) => buildTemplatePlacemark(wp, i)).join('\n')}
+${polygonPlacemarkXml}${seg.waypoints.map((wp, i) => buildTemplatePlacemark(wp, i)).join('\n')}
       <wpml:dualgazeIsClosedLoop>${mission.isClosedLoop ? 1 : 0}</wpml:dualgazeIsClosedLoop>
       <wpml:dualgazeGlobalAction>${mission.globalAction}</wpml:dualgazeGlobalAction>
-${scanParamsXml}    </Folder>
-  </Document>
-</kml>`;
+${scanParamsXml}    </Folder>`;
 }
 
 function buildTemplatePlacemark(wp: Waypoint, index: number): string {
@@ -135,17 +201,28 @@ function buildTemplatePlacemark(wp: Waypoint, index: number): string {
 function buildWaylinesWpml(mission: Mission): string {
   const drone = DRONE_CATALOG.find((d) => d.id === mission.droneId);
   const payload = PAYLOAD_CATALOG.find((p) => p.id === mission.payloadId);
-  const wps = flightWaypoints(mission);
-  const distance = totalPathDistance(wps).toFixed(1);
-  const duration = mission.globalSpeed > 0
-    ? Math.round(parseFloat(distance) / mission.globalSpeed)
-    : 0;
-  const takeOffPointXml = buildTakeOffPointXml(mission);
+  const segs = buildWaylineSegments(mission);
   const isMapping = mission.type === 'mapping';
   const polygonPlacemarkXml = isMapping
     ? buildPolygonPlacemarkXml(mission.polygon ?? [])
     : '';
   const scanParamsXml = isMapping ? buildScanParamsXml(mission.scanParams) : '';
+  const startActionXml = isMapping
+    ? buildStartActionGroupXml(mission.scanParams?.gimbalPitchAngle ?? -45)
+    : '';
+
+  const foldersXml = segs
+    .map((seg) =>
+      buildWaylineFolder(
+        mission,
+        seg,
+        startActionXml,
+        polygonPlacemarkXml,
+        scanParamsXml,
+        isMapping,
+      ),
+    )
+    .join('\n');
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="${KML_NS}" xmlns:wpml="${WPML_NS}">
@@ -168,20 +245,44 @@ function buildWaylinesWpml(mission: Mission): string {
         <wpml:payloadPositionIndex>${payload?.payloadPositionIndex ?? 0}</wpml:payloadPositionIndex>
       </wpml:payloadInfo>
     </wpml:missionConfig>
-    <Folder>
-      <wpml:templateId>0</wpml:templateId>
-      <wpml:waylineId>0</wpml:waylineId>
-      <wpml:dualgazeMissionType>${mission.type}</wpml:dualgazeMissionType>
+${foldersXml}
+  </Document>
+</kml>`;
+}
+
+function buildWaylineFolder(
+  mission: Mission,
+  seg: WaylineSegment,
+  startActionXml: string,
+  polygonPlacemarkXml: string,
+  scanParamsXml: string,
+  isMapping: boolean,
+): string {
+  const distance = totalPathDistance(seg.waypoints).toFixed(1);
+  const duration =
+    mission.globalSpeed > 0
+      ? Math.round(parseFloat(distance) / mission.globalSpeed)
+      : 0;
+  const faceMetaXml = facadeFaceMetaXml(seg);
+  const takeOffPointXml = buildTakeOffPointXml(mission, seg);
+  const placemarks = seg.waypoints
+    .map((wp, i, all) =>
+      buildWaylinePlacemark(wp, i, all.length, mission.globalAction, isMapping),
+    )
+    .join('\n');
+
+  return `    <Folder>
+      <wpml:templateId>${seg.waylineId}</wpml:templateId>
+      <wpml:waylineId>${seg.waylineId}</wpml:waylineId>
+      <wpml:dualgazeMissionType>${mission.type}</wpml:dualgazeMissionType>${faceMetaXml}
       <wpml:distance>${distance}</wpml:distance>
       <wpml:duration>${duration}</wpml:duration>
       <wpml:autoFlightSpeed>${mission.globalSpeed}</wpml:autoFlightSpeed>
       <wpml:executeHeightMode>${mission.heightMode}</wpml:executeHeightMode>${takeOffPointXml}
-${isMapping ? buildStartActionGroupXml(mission.scanParams?.gimbalPitchAngle ?? -45) : ''}${polygonPlacemarkXml}${wps.map((wp, i, all) => buildWaylinePlacemark(wp, i, all.length, mission.globalAction, isMapping)).join('\n')}
+${startActionXml}${polygonPlacemarkXml}${placemarks}
       <wpml:dualgazeIsClosedLoop>${mission.isClosedLoop ? 1 : 0}</wpml:dualgazeIsClosedLoop>
       <wpml:dualgazeGlobalAction>${mission.globalAction}</wpml:dualgazeGlobalAction>
-${scanParamsXml}    </Folder>
-  </Document>
-</kml>`;
+${scanParamsXml}    </Folder>`;
 }
 
 function buildWaylinePlacemark(
@@ -279,11 +380,12 @@ function buildActionXml(action: WaypointAction, id: number): string {
   }
 }
 
-function buildTakeOffPointXml(mission: Mission): string {
+function buildTakeOffPointXml(mission: Mission, seg: WaylineSegment): string {
+  // facade 多架次场景下，每架次的 takeOffPoint 用该 face 自己的首航点（操作员在
+  // 那栋楼 / 那一面附近起飞，参考 height 也对应该 face）。其它 mission 用整条路径首点。
   if (mission.heightMode === 'WGS84') return '';
-  const wps = flightWaypoints(mission);
-  if (wps.length === 0) return '';
-  const first = wps[0];
+  if (seg.waypoints.length === 0) return '';
+  const first = seg.waypoints[0];
   return `
       <wpml:takeOffPoint>
         <wpml:latitude>${first.lat.toFixed(7)}</wpml:latitude>
