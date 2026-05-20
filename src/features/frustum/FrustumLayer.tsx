@@ -8,7 +8,7 @@ import { faceCesiumColor } from '../../lib/face-color';
 import type { Mission, Waypoint } from '../../types/mission';
 import { effectiveWaypoints } from '../simulation/SimulationLoop';
 
-const FAR_METERS = 3;
+const FAR_METERS = 1.2;
 const ASPECT = 4 / 3;
 
 /**
