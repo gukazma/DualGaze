@@ -141,7 +141,7 @@ export function FacadeLayer() {
             color: hue.vertex,
             outlineColor: Cesium.Color.BLACK,
             outlineWidth: 1,
-            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            // 参与深度测试：被前景几何挡住时隐藏，避免穿墙干扰
           },
           label: {
             text: String(i + 1),
@@ -151,7 +151,7 @@ export function FacadeLayer() {
             outlineWidth: 2,
             style: Cesium.LabelStyle.FILL_AND_OUTLINE,
             pixelOffset: new Cesium.Cartesian2(0, -14),
-            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            // 参与深度测试：被前景几何挡住时隐藏，避免穿墙干扰
           },
         });
         list.push(e);
@@ -213,7 +213,7 @@ export function FacadeLayer() {
             pixelOffset: new Cesium.Cartesian2(0, -24),
             showBackground: true,
             backgroundColor: Cesium.Color.fromCssColorString('#131720').withAlpha(0.7),
-            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            // 参与深度测试：被前景几何挡住时隐藏，避免穿墙干扰
           },
         }),
       );
@@ -307,7 +307,7 @@ export function FacadeLayer() {
               : COLOR_PREVIEW_OUTLINE,
             outlineColor: COLOR_PREVIEW_OUTLINE,
             outlineWidth: isInferred ? 2 : 1,
-            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            // 参与深度测试：被前景几何挡住时隐藏，避免穿墙干扰
           },
           label: {
             text: isInferred ? `${i + 1}★` : String(i + 1),
@@ -317,7 +317,7 @@ export function FacadeLayer() {
             outlineWidth: 2,
             style: Cesium.LabelStyle.FILL_AND_OUTLINE,
             pixelOffset: new Cesium.Cartesian2(0, -16),
-            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            // 参与深度测试：被前景几何挡住时隐藏，避免穿墙干扰
           },
         }),
       );
