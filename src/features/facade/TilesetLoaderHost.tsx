@@ -32,8 +32,11 @@ export function TilesetLoaderHost() {
   const setError = useTilesetLoadingStore((s) => s.setError);
   const reset = useTilesetLoadingStore((s) => s.reset);
 
+  // facade + orbit 都需要 tileset
   const source: TilesetSource | undefined =
-    mission?.type === 'facade' ? mission.tilesetSource : undefined;
+    mission?.type === 'facade' || mission?.type === 'orbit'
+      ? mission.tilesetSource
+      : undefined;
 
   // 用 source 的 (kind + url + sessionId) 作为变化 key
   const sourceKey = source
