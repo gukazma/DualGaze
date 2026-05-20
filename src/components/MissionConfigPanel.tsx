@@ -55,6 +55,8 @@ export function MissionConfigPanel() {
 
   const isMapping = mission.type === 'mapping';
   const isFacade = mission.type === 'facade';
+  const isOrbit = mission.type === 'orbit';
+  const needsTileset = isFacade || isOrbit;
   const scanParams = mission.scanParams ?? MAPPING_DEFAULTS;
 
   const set = <K extends keyof Mission>(key: K, value: Mission[K]): void => {
@@ -101,7 +103,7 @@ export function MissionConfigPanel() {
             </RowStack>
           </Card>
 
-          {isFacade && <TilesetSourcePicker />}
+          {needsTileset && <TilesetSourcePicker />}
           {isFacade && <FacadeConfigPanel />}
 
           {isMapping && (
