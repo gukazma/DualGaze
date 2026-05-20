@@ -265,7 +265,8 @@ export function FacadeLayer() {
             }, false) as unknown as Cesium.Property,
             outlineColor: Cesium.Color.BLACK,
             outlineWidth: 1,
-            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            // 不禁用深度测试 —— 航点被其它墙挡住时应该看不到，否则画下一面时被
+            // 上一面的点穿透干扰视线
           },
         });
         samples.push(e);
@@ -400,7 +401,7 @@ export function FacadeLayer() {
                 color: unsafe ? COLOR_UNSAFE : COLOR_PREVIEW_SCANPATH,
                 outlineColor: Cesium.Color.BLACK,
                 outlineWidth: 1,
-                disableDepthTestDistance: Number.POSITIVE_INFINITY,
+                // 不禁用深度，同 saved face 航点：被墙挡住就该看不到
               },
             }),
           );
