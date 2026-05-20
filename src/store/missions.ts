@@ -20,6 +20,7 @@ import {
   type WaypointActionType,
 } from '../types/mission';
 import { generateScanPath } from '../lib/mapping-scan';
+import { flipFacadePlane } from '../lib/facade-plane';
 import { useFacadePickerStore } from './facade-picker';
 
 interface MissionsState {
@@ -90,6 +91,11 @@ interface MissionsState {
    * 因为 store 拿不到 viewer，所以算法在 React 层跑；store 这里只负责落地。
    */
   setFaceScanResult: (faceId: string, plane: FacadePlane | undefined, scanPath: Waypoint[] | undefined) => void;
+  /**
+   * 翻转某 face 的法向 —— 把 plane 取反 + 清空 scanPath（让 FacadeScanRecomputeHost
+   * 用新 plane 重算航点）。HUD / FacadeFaceList 的「反转」按钮调这个。
+   */
+  flipFaceNormal: (faceId: string) => void;
   /**
    * 把 facade-picker store 当前的 preview 状态 commit 成一个新 face。
    * 如果当前不是 preview 状态（drawing/error），不动；返回 false。
@@ -412,6 +418,20 @@ export const useMissionsStore = create<MissionsState>()(
               facadeFaces: faces.map((f) =>
                 f.id === faceId ? { ...f, plane, scanPath } : f,
               ),
+            };
+          }),
+
+        flipFaceNormal: (faceId) =>
+          updCurrent((m) => {
+            if (m.type !== 'facade') return m;
+            const faces = m.facadeFaces ?? [];
+            return {
+              ...m,
+              facadeFaces: faces.map((f) => {
+                if (f.id !== faceId || !f.plane) return f;
+                // 翻 plane.normal + vAxis（保持右手系），清 scanPath 让 RecomputeHost 重算
+                return { ...f, plane: flipFacadePlane(f.plane), scanPath: undefined };
+              }),
             };
           }),
 

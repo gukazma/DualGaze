@@ -124,24 +124,7 @@ export class FacadePicker {
     // F：preview 状态下翻转法向
     if ((e.key === 'f' || e.key === 'F') && this.state.mode === 'preview') {
       e.preventDefault();
-      const flipped = flipFacadePlane(this.state.plane);
-      const scanPath = generateFacadeScanPath(this.viewer, flipped, {
-        ...FACADE_DEFAULTS,
-      });
-      const { unsafeCount } = annotateUnsafe(
-        this.viewer,
-        flipped,
-        scanPath,
-        FACADE_DEFAULTS.standoff,
-      );
-      this.setState({
-        mode: 'preview',
-        corners: this.state.corners,
-        cornerInferredCount: this.state.cornerInferredCount,
-        plane: flipped,
-        scanPath,
-        unsafeCount,
-      });
+      this.flipNormalInPreview();
       return;
     }
     // Enter：preview 状态下保存
@@ -169,13 +152,39 @@ export class FacadePicker {
     // 法向自动朝外：拿 tileset 中心，N 指向中心则取反
     const tilesetCenter = findFirstTilesetCenter(this.viewer);
     const plane = ensureNormalOutward(rawPlane, tilesetCenter);
-    const scanPath = generateFacadeScanPath(this.viewer, plane, { ...FACADE_DEFAULTS });
+    const scanPath = generateFacadeScanPath(this.viewer, plane, corners, { ...FACADE_DEFAULTS });
     const { unsafeCount } = annotateUnsafe(this.viewer, plane, scanPath, FACADE_DEFAULTS.standoff);
     this.setState({
       mode: 'preview',
       corners,
       cornerInferredCount,
       plane,
+      scanPath,
+      unsafeCount,
+    });
+  }
+
+  /**
+   * 在 preview 状态翻转法向 —— F 键 / HUD「反转法向」按钮共用。
+   * plane / scanPath / unsafeCount 全重算。
+   */
+  flipNormalInPreview(): void {
+    if (this.state.mode !== 'preview') return;
+    const flipped = flipFacadePlane(this.state.plane);
+    const scanPath = generateFacadeScanPath(this.viewer, flipped, this.state.corners, {
+      ...FACADE_DEFAULTS,
+    });
+    const { unsafeCount } = annotateUnsafe(
+      this.viewer,
+      flipped,
+      scanPath,
+      FACADE_DEFAULTS.standoff,
+    );
+    this.setState({
+      mode: 'preview',
+      corners: this.state.corners,
+      cornerInferredCount: this.state.cornerInferredCount,
+      plane: flipped,
       scanPath,
       unsafeCount,
     });

@@ -4,6 +4,13 @@ import type { FacadePickerState } from '../features/facade/FacadePicker';
 interface FacadePickerStore {
   state: FacadePickerState;
   setState: (s: FacadePickerState) => void;
+  /**
+   * picker class 自己 mount 时注册的 flip 入口 —— 这样 HUD 按钮可以触发
+   * picker.flipNormalInPreview()（FacadePicker 是 vanilla class，外部拿不到
+   * 实例，必须通过 store 这个间接层）。picker unmount 时清掉。
+   */
+  flipPreviewNormal: (() => void) | null;
+  setFlipPreviewNormal: (fn: (() => void) | null) => void;
 }
 
 /**
@@ -16,4 +23,6 @@ interface FacadePickerStore {
 export const useFacadePickerStore = create<FacadePickerStore>((set) => ({
   state: { mode: 'drawing', corners: [] },
   setState: (s) => set({ state: s }),
+  flipPreviewNormal: null,
+  setFlipPreviewNormal: (fn) => set({ flipPreviewNormal: fn }),
 }));

@@ -121,22 +121,27 @@ function FacadePickerMount() {
   const pickerMode = useUiStore((s) => s.pickerMode);
   const setPickerMode = useUiStore((s) => s.setPickerMode);
   const setPickerState = useFacadePickerStore((s) => s.setState);
+  const setFlipPreviewNormal = useFacadePickerStore((s) => s.setFlipPreviewNormal);
 
   useEffect(() => {
     if (!viewer) return;
     if (pickerMode !== 'facade-draw') {
       // reset preview state when picker not active
       setPickerState({ mode: 'drawing', corners: [] });
+      setFlipPreviewNormal(null);
       return;
     }
     const picker = new FacadePicker(viewer);
     const unsub = picker.onStateChange((s) => setPickerState(s));
+    // 把 picker 的 flip 入口注册到 store，让 HUD 按钮能调
+    setFlipPreviewNormal(() => picker.flipNormalInPreview());
     return () => {
       unsub();
       picker.destroy();
       setPickerState({ mode: 'drawing', corners: [] });
+      setFlipPreviewNormal(null);
     };
-  }, [viewer, pickerMode, setPickerState]);
+  }, [viewer, pickerMode, setPickerState, setFlipPreviewNormal]);
 
   // 切到非 facade mission 时强制退出 picker
   const mission = useCurrentMission();

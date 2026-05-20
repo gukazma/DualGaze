@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Trash2, Eye, EyeOff, Pencil, Plane } from 'lucide-react';
+import { Plus, Trash2, Eye, EyeOff, Pencil, Plane, RefreshCw } from 'lucide-react';
 import { ScrollArea } from './ui/scroll-area';
 import { Input } from './ui/input';
 import { useCurrentMission, useMissionsStore } from '../store/missions';
@@ -19,6 +19,7 @@ export function FacadeFaceList() {
   const updateFacadeFace = useMissionsStore((s) => s.updateFacadeFace);
   const removeFacadeFace = useMissionsStore((s) => s.removeFacadeFace);
   const setActiveFaceId = useMissionsStore((s) => s.setActiveFaceId);
+  const flipFaceNormal = useMissionsStore((s) => s.flipFaceNormal);
   const setTilesetSource = useMissionsStore((s) => s.setTilesetSource);
   const pickerMode = useUiStore((s) => s.pickerMode);
   const setPickerMode = useUiStore((s) => s.setPickerMode);
@@ -129,6 +130,24 @@ export function FacadeFaceList() {
                       ) : null;
                     })()}
                   </div>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      flipFaceNormal(f.id);
+                    }}
+                    disabled={!f.plane}
+                    className={cn(
+                      'flex items-center gap-1 rounded-sm border px-1.5 py-0.5 text-[10px] font-bold transition-colors',
+                      f.plane
+                        ? 'border-accent-cyan bg-accent-cyan/10 text-accent-cyan hover:bg-accent-cyan/20'
+                        : 'cursor-not-allowed border-border-subtle text-text-muted',
+                    )}
+                    title="反转法向（F 键在 picker 中同效）"
+                  >
+                    <RefreshCw className="h-3 w-3" />
+                    反转
+                  </button>
                   <button
                     type="button"
                     onClick={(e) => {

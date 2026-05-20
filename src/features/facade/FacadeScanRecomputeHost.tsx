@@ -26,7 +26,7 @@ export function FacadeScanRecomputeHost() {
       if (!face.plane) continue;
       if (face.scanPath !== undefined) continue;
       const plane = face.params.flipNormal ? flipFacadePlane(face.plane) : face.plane;
-      const scanPath = generateFacadeScanPath(viewer, plane, face.params);
+      const scanPath = generateFacadeScanPath(viewer, plane, face.corners, face.params);
       annotateUnsafe(viewer, plane, scanPath, face.params.standoff);
       setFaceScanResult(face.id, face.plane, scanPath);
     }

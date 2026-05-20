@@ -1,7 +1,12 @@
 import * as Cesium from 'cesium';
-import { cartesian3ToWgs84 } from './coord';
+import { cartesian3ToWgs84, wgs84ToCartesian3 } from './coord';
 import { createWaypoint } from '../types/mission';
-import type { FacadePlane, FacadeScanParams, Waypoint } from '../types/mission';
+import type {
+  FacadeCorner,
+  FacadePlane,
+  FacadeScanParams,
+  Waypoint,
+} from '../types/mission';
 
 /**
  * Facade S 扫描路径生成主入口。
@@ -24,12 +29,18 @@ import type { FacadePlane, FacadeScanParams, Waypoint } from '../types/mission';
 export function generateFacadeScanPath(
   viewer: Cesium.Viewer | null,
   plane: FacadePlane,
+  corners: FacadeCorner[] | null,
   params: FacadeScanParams,
 ): Waypoint[] {
   // u/v 实际可用范围（减去 margin）
   const halfU = plane.width / 2 - params.marginU;
   const halfV = plane.height / 2 - params.marginV;
   if (halfU <= 0 || halfV <= 0) return [];
+
+  // 4 角点投影到 plane (u, v) 坐标，得到实际四边形（用于 in-polygon 裁剪）。
+  // 没有 corners（旧调用方）就跳过裁剪，沿用 bbox-only 旧行为。
+  const polyUV =
+    corners && corners.length === 4 ? projectCornersToUV(plane, corners) : null;
 
   // 网格 u/v 坐标列表
   const uCount = Math.max(1, Math.floor((2 * halfU) / Math.max(0.01, params.spacingH)) + 1);
@@ -79,6 +90,10 @@ export function generateFacadeScanPath(
   for (let i = 0; i < seq.length; i++) {
     const { u, v } = seq[i];
 
+    // 裁剪到 4 角点定义的实际四边形内（点不在多边形里直接跳过）。
+    // 4 角点边界外的网格点，相机拍到的会是邻居建筑 / 天空，没意义。
+    if (polyUV && !pointInQuad(u, v, polyUV)) continue;
+
     // **均匀网格**：相机 = (plane.origin + u·uAxis + v·vAxis) + standoff·N
     // 不 raycast 表面 —— raycast 会因为树/凸出物把相机算到非平面距离，破坏均匀性
     // 并且可能让相机落在墙体内（碰撞风险）
@@ -119,7 +134,8 @@ export function generateFacadeScanPath(
       lon: wgs.lon,
       lat: wgs.lat,
       alt: wgs.alt,
-      index: i,
+      // 用 waypoints.length 当 index，裁剪掉的点不占位（之前用 i 会留空洞）
+      index: waypoints.length,
       speed: params.speed,
       heading: headingDeg,
       pitch: pitchDeg,
@@ -131,4 +147,52 @@ export function generateFacadeScanPath(
   }
 
   return waypoints;
+}
+
+/**
+ * 4 角点 → 投影到 plane (u, v) 局部坐标。
+ *
+ * plane.origin / uAxis / vAxis 都在 ECEF，corners 是 WGS84。
+ * 对每个 corner：
+ *   p = wgs84ToCartesian3(c)
+ *   u = (p - origin) · uAxis
+ *   v = (p - origin) · vAxis
+ *
+ * 假设 corners 按用户拾取顺序排列（通常 TL → BL → BR → TR），
+ * 返回的多边形顶点也是同样顺序 → pointInQuad 用 even-odd ray cast。
+ */
+function projectCornersToUV(
+  plane: FacadePlane,
+  corners: FacadeCorner[],
+): Array<{ u: number; v: number }> {
+  return corners.map((c) => {
+    const p = wgs84ToCartesian3(c.lon, c.lat, c.alt);
+    const dx = p.x - plane.origin.x;
+    const dy = p.y - plane.origin.y;
+    const dz = p.z - plane.origin.z;
+    return {
+      u: dx * plane.uAxis.x + dy * plane.uAxis.y + dz * plane.uAxis.z,
+      v: dx * plane.vAxis.x + dy * plane.vAxis.y + dz * plane.vAxis.z,
+    };
+  });
+}
+
+/** 经典 even-odd ray cast 点在多边形内测试（u/v 2D）。 */
+function pointInQuad(
+  u: number,
+  v: number,
+  poly: Array<{ u: number; v: number }>,
+): boolean {
+  let inside = false;
+  const n = poly.length;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const ui = poly[i].u;
+    const vi = poly[i].v;
+    const uj = poly[j].u;
+    const vj = poly[j].v;
+    const intersects =
+      vi > v !== vj > v && u < ((uj - ui) * (v - vi)) / (vj - vi) + ui;
+    if (intersects) inside = !inside;
+  }
+  return inside;
 }
