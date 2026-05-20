@@ -3,6 +3,7 @@ import { pickWgs84At } from '../../lib/cesium-pick';
 import { fitPlaneFromCorners, flipFacadePlane } from '../../lib/facade-plane';
 import { generateFacadeScanPath } from '../../lib/facade-scan';
 import { annotateUnsafe, ensureNormalOutward } from '../../lib/facade-safety';
+import { cartesian3ToWgs84, wgs84ToCartesian3 } from '../../lib/coord';
 import { useMissionsStore } from '../../store/missions';
 import { FACADE_DEFAULTS } from '../../types/mission';
 import type { FacadeCorner, FacadePlane, Waypoint } from '../../types/mission';
@@ -11,9 +12,9 @@ import type { FacadeCorner, FacadePlane, Waypoint } from '../../types/mission';
  * Facade 4 角拾取器，vanilla TS class（参考 PolygonPicker）。
  *
  * 交互流程：
- *   drawing-1: 等待第 1 角点（左键命中 tileset 即落点）
- *   drawing-2 / drawing-3: 同上
- *   drawing-4: 落第 4 点后自动拟合 plane → 切 preview
+ *   drawing-1..4: 用户依次点 4 个角点（左键命中 tileset 即落点）
+ *                 第 4 点落下后会**强制投影到前 3 点决定的平面**上，保证拟合出
+ *                 的矩形 4 角严格共面（不靠拾取精度运气）。
  *   preview : 显示 plane / scanPath；按
  *             F → 翻转法向（plane + scanPath 重算）
  *             Enter → 保存（store.addFacadeFace + setFaceScanResult）→ 重置 drawing-1
@@ -28,7 +29,10 @@ export type FacadePickerState =
   | {
       mode: 'preview';
       corners: FacadeCorner[];
-      /** 是否第 4 角是自动推断（picker 在 3 角后闭合时为 true） */
+      /**
+       * 第 4 点是否被"投影到平面"过（用户原始点与最终点的偏移 ≥ 0.05m 即标记 true）。
+       * UI 上对此角点画一个虚线轮廓提示，告知"已自动校正到共面"。
+       */
       cornerInferredCount: number;
       plane: FacadePlane;
       scanPath: Waypoint[];
@@ -89,24 +93,23 @@ export class FacadePicker {
     if (!wgs) return;
     const corner: FacadeCorner = { lon: wgs.lon, lat: wgs.lat, alt: wgs.alt };
     const corners = [...this.state.corners, corner];
-    if (corners.length === 3) {
-      // 3 角自动推第 4 角（平行四边形闭合：c4 = c1 + (c3 - c2)），进入 preview
-      // 用户仍可点第 4 角点显式覆盖（在 preview 状态下 Esc 重画 + 重新点 4 个）
-      const c0 = corners[0], c1 = corners[1], c2 = corners[2];
-      const c3: FacadeCorner = {
-        lon: c0.lon + (c2.lon - c1.lon),
-        lat: c0.lat + (c2.lat - c1.lat),
-        alt: c0.alt + (c2.alt - c1.alt),
-      };
-      this.computeAndPreview([...corners, c3], 1);
-      return;
-    }
     if (corners.length < 4) {
       this.setState({ mode: 'drawing', corners });
       return;
     }
-    // 4 角集齐 → 拟合 + 算 scanPath → preview
-    this.computeAndPreview(corners, 0);
+    // 4 角齐了 —— 把第 4 角强制投影到前 3 角决定的平面上，再拟合。
+    // 这是 UX 关键：墙面有起伏 / picking 有误差 → 4 点不一定真共面，
+    // 后端 SVD 会硬挤一个平面但歪斜。projected 4th 让 4 点严格共面，矩形拟合稳。
+    const { projected, dCorrectionM } = projectFourthOntoPlane(
+      corners[0],
+      corners[1],
+      corners[2],
+      corners[3],
+    );
+    const finalCorners: FacadeCorner[] = [corners[0], corners[1], corners[2], projected];
+    // 偏移 ≥ 0.05m 才标"已校正"（picking 误差通常 < 0.05m，不算偏）
+    const correctedCount = dCorrectionM >= 0.05 ? 1 : 0;
+    this.computeAndPreview(finalCorners, correctedCount);
   }
 
   // ----- 键盘 -----
@@ -212,4 +215,50 @@ function findFirstTilesetCenter(viewer: Cesium.Viewer): Cesium.Cartesian3 | null
     }
   }
   return null;
+}
+
+/**
+ * 把第 4 角点投影到由前 3 角点决定的平面上，保证 4 点严格共面。
+ *
+ * 计算在 ECEF 笛卡尔系（wgs84ToCartesian3）下做：
+ *   1. p0/p1/p2 三点定义平面：normal = (p1-p0) × (p2-p0) 归一化
+ *   2. p3' = p3 - ((p3 - p0) · normal) * normal  ← 投影
+ *   3. 转回 WGS84 经纬度 + alt
+ *
+ * 返回投影后的 corner + 原始 p3 与 p3' 的距离（用来判定 UI 是否提示 "已校正"）。
+ */
+function projectFourthOntoPlane(
+  p0: FacadeCorner,
+  p1: FacadeCorner,
+  p2: FacadeCorner,
+  p3: FacadeCorner,
+): { projected: FacadeCorner; dCorrectionM: number } {
+  const a = wgs84ToCartesian3(p0.lon, p0.lat, p0.alt);
+  const b = wgs84ToCartesian3(p1.lon, p1.lat, p1.alt);
+  const c = wgs84ToCartesian3(p2.lon, p2.lat, p2.alt);
+  const d = wgs84ToCartesian3(p3.lon, p3.lat, p3.alt);
+
+  const e1 = Cesium.Cartesian3.subtract(b, a, new Cesium.Cartesian3());
+  const e2 = Cesium.Cartesian3.subtract(c, a, new Cesium.Cartesian3());
+  const n = Cesium.Cartesian3.cross(e1, e2, new Cesium.Cartesian3());
+  const nLen = Cesium.Cartesian3.magnitude(n);
+  if (nLen < 1e-9) {
+    // 前 3 角共线 → 不能投影，原样返回（下游 fitPlaneFromCorners 会报 degenerate）
+    return { projected: p3, dCorrectionM: 0 };
+  }
+  Cesium.Cartesian3.divideByScalar(n, nLen, n);
+
+  const da = Cesium.Cartesian3.subtract(d, a, new Cesium.Cartesian3());
+  const signedDist = Cesium.Cartesian3.dot(da, n);
+  const dProj = new Cesium.Cartesian3(
+    d.x - signedDist * n.x,
+    d.y - signedDist * n.y,
+    d.z - signedDist * n.z,
+  );
+  const dCorrectionM = Math.abs(signedDist);
+  const w = cartesian3ToWgs84(dProj);
+  return {
+    projected: { lon: w.lon, lat: w.lat, alt: w.alt },
+    dCorrectionM,
+  };
 }

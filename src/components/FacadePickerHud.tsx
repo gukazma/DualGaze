@@ -77,8 +77,8 @@ export function FacadePickerHud() {
                 : cornersCount === 1
                   ? '② 点立面左下角'
                   : cornersCount === 2
-                    ? '③ 点右下角 · 自动闭合矩形（或继续点 4 精确指定）'
-                    : '④ 点右上角（精确指定，覆盖自动推断）'}
+                    ? '③ 点右下角'
+                    : '④ 点右上角（自动投影到前 3 点平面以保证共面）'}
         </span>
 
         {isPreview && unsafeCount > 0 && (
