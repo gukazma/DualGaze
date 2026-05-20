@@ -6,12 +6,15 @@ import { WaypointActionsPanel } from './WaypointActionsPanel';
 import { MappingScanList } from './MappingScanList';
 import { FacadeFaceList } from './FacadeFaceList';
 import { FacadeScanList } from './FacadeScanList';
+import { OrbitConfigPanel } from './OrbitConfigPanel';
 import { useCurrentMission } from '../store/missions';
-import { useUiStore } from '../store/ui';
+import { useUiStore, type RightSheetTab } from '../store/ui';
 import { cn } from '../lib/utils';
 
 const TAB_CLS =
   'h-full rounded-none border-b-2 border-transparent text-[12px] data-[state=active]:border-accent data-[state=active]:bg-transparent data-[state=active]:text-accent data-[state=active]:shadow-none';
+const TAB_CLS_ORBIT =
+  'h-full rounded-none border-b-2 border-transparent text-[12px] data-[state=active]:border-[#a64aff] data-[state=active]:bg-transparent data-[state=active]:text-[#a64aff] data-[state=active]:shadow-none';
 
 export function RightSheet() {
   const mission = useCurrentMission();
@@ -19,6 +22,7 @@ export function RightSheet() {
   const setTab = useUiStore((s) => s.setRightSheetTab);
   const isMapping = mission?.type === 'mapping';
   const isFacade = mission?.type === 'facade';
+  const isOrbit = mission?.type === 'orbit';
 
   // 不同 mission type 下不合法的 tab 自动回退
   useEffect(() => {
@@ -26,22 +30,31 @@ export function RightSheet() {
       if (tab !== 'faces' && tab !== 'config' && tab !== 'scan') setTab('faces');
       return;
     }
+    if (isOrbit) {
+      if (tab !== 'orbit' && tab !== 'config' && tab !== 'scan') setTab('orbit' as RightSheetTab);
+      return;
+    }
     if (isMapping) {
-      if (tab === 'actions' || tab === 'faces') setTab('waypoints');
+      if (tab === 'actions' || tab === 'faces' || tab === 'orbit') setTab('waypoints');
       return;
     }
     // patrol
-    if (tab === 'scan' || tab === 'faces') setTab('waypoints');
-  }, [isMapping, isFacade, tab, setTab]);
+    if (tab === 'scan' || tab === 'faces' || tab === 'orbit') setTab('waypoints');
+  }, [isMapping, isFacade, isOrbit, tab, setTab]);
 
   const facadeFaceCount = mission?.facadeFaces?.length ?? 0;
   const facadeWaypointCount =
     mission?.facadeFaces?.reduce((sum, f) => sum + (f.enabled ? (f.scanPath?.length ?? 0) : 0), 0) ?? 0;
+  const orbitWpCount = mission?.orbit?.scanPath?.length ?? 0;
   const headerCount = isMapping
     ? `${mission?.polygon?.length ?? 0} 顶点 · ${mission?.scanPath?.length ?? 0} 扫描点`
     : isFacade
       ? `${facadeFaceCount} 面 · ${facadeWaypointCount} 航点`
-      : `${mission?.waypoints.length ?? 0} 航点`;
+      : isOrbit
+        ? mission?.orbit
+          ? `R=${mission.orbit.radius.toFixed(1)}m · ${orbitWpCount} 航点`
+          : '未拾取'
+        : `${mission?.waypoints.length ?? 0} 航点`;
 
   return (
     <div className="flex h-full w-full flex-col">
@@ -79,6 +92,18 @@ export function RightSheet() {
                   任务配置
                 </TabsTrigger>
                 <TabsTrigger value="scan" className={TAB_CLS}>
+                  扫描列表
+                </TabsTrigger>
+              </>
+            ) : isOrbit ? (
+              <>
+                <TabsTrigger value="orbit" className={TAB_CLS_ORBIT}>
+                  环绕配置
+                </TabsTrigger>
+                <TabsTrigger value="config" className={TAB_CLS_ORBIT}>
+                  任务配置
+                </TabsTrigger>
+                <TabsTrigger value="scan" className={TAB_CLS_ORBIT}>
                   扫描列表
                 </TabsTrigger>
               </>
@@ -126,6 +151,16 @@ export function RightSheet() {
             </TabsContent>
           )}
           {isFacade && (
+            <TabsContent value="scan" className="mt-0 flex-1 overflow-hidden">
+              <FacadeScanList />
+            </TabsContent>
+          )}
+          {isOrbit && (
+            <TabsContent value="orbit" className="mt-0 flex-1 overflow-hidden">
+              <OrbitConfigPanel />
+            </TabsContent>
+          )}
+          {isOrbit && (
             <TabsContent value="scan" className="mt-0 flex-1 overflow-hidden">
               <FacadeScanList />
             </TabsContent>

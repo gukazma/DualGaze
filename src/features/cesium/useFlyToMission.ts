@@ -84,6 +84,16 @@ function collectAnchors(
   if (mission.type === 'mapping') {
     return mission.polygon ?? [];
   }
+  if (mission.type === 'orbit') {
+    // 用 axis 端点 + scanPath（如果已算）；scanPath 没算就用 axisBottom 一个点（不至于飞默认）
+    if (!mission.orbit) return [];
+    const out: Array<{ lon: number; lat: number; alt: number }> = [
+      mission.orbit.axisBottom,
+      mission.orbit.axisTop,
+    ];
+    for (const wp of mission.orbit.scanPath ?? []) out.push({ lon: wp.lon, lat: wp.lat, alt: wp.alt });
+    return out;
+  }
   if (mission.type === 'facade') {
     // 优先 activeFaceId 的角点 + scanPath；都没有就把所有 face 的角点 / scanPath 合并
     const faces = mission.facadeFaces ?? [];

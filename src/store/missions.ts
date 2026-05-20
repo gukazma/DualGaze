@@ -13,6 +13,8 @@ import {
   type MappingScanParams,
   type Mission,
   type MissionType,
+  type OrbitDef,
+  type OrbitScanParams,
   type PolygonVertex,
   type TilesetSource,
   type Waypoint,
@@ -105,6 +107,14 @@ interface MissionsState {
    * 外部拿不到实例，所以重新走 store API 实现。
    */
   commitFacadePreviewIfAny: () => boolean;
+
+  // ---------- orbit ----------
+  /** 设置 / 替换当前 mission 的 orbit 几何（picker 完成后调）；params 用默认或现有 */
+  setOrbit: (orbit: OrbitDef | undefined) => void;
+  /** 更新 orbit 参数（清 scanPath 让 OrbitScanRecomputeHost 重算） */
+  updateOrbitParams: (patch: Partial<OrbitScanParams>) => void;
+  /** 直接写回 orbit.scanPath（由 OrbitScanRecomputeHost 算完调） */
+  setOrbitScanResult: (scanPath: Waypoint[] | undefined) => void;
 }
 
 const reindex = (waypoints: Waypoint[]): Waypoint[] =>
@@ -451,11 +461,37 @@ export const useMissionsStore = create<MissionsState>()(
           useFacadePickerStore.getState().setState({ mode: 'drawing', corners: [] });
           return true;
         },
+
+        // ---------- orbit ----------
+        setOrbit: (orbit) =>
+          updCurrent((m) => {
+            if (m.type !== 'orbit') return m;
+            return { ...m, orbit };
+          }),
+
+        updateOrbitParams: (patch) =>
+          updCurrent((m) => {
+            if (m.type !== 'orbit' || !m.orbit) return m;
+            return {
+              ...m,
+              orbit: {
+                ...m.orbit,
+                params: { ...m.orbit.params, ...patch },
+                scanPath: undefined, // 清空让 RecomputeHost 重算
+              },
+            };
+          }),
+
+        setOrbitScanResult: (scanPath) =>
+          updCurrent((m) => {
+            if (m.type !== 'orbit' || !m.orbit) return m;
+            return { ...m, orbit: { ...m.orbit, scanPath } };
+          }),
       };
     },
     {
       name: 'dualgaze.missions',
-      version: 6,
+      version: 7,
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
         missions: state.missions,

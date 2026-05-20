@@ -40,6 +40,8 @@ interface WaylineSegment {
   faceCorners?: { lon: number; lat: number; alt: number }[];
   /** 仅 facade 有；用于 round-trip 还原 face.params（FacadeScanParams JSON） */
   faceParamsJson?: string;
+  /** 仅 orbit 有；OrbitDef JSON（含 axis / radius / params），让 round-trip 还原几何 */
+  orbitDefJson?: string;
   waypoints: Waypoint[];
 }
 
@@ -63,6 +65,22 @@ function buildWaylineSegments(mission: Mission): WaylineSegment[] {
       waypoints: (f.scanPath ?? []).map(reindex),
     }));
   }
+  if (mission.type === 'orbit') {
+    return [
+      {
+        waylineId: 0,
+        waypoints: (mission.orbit?.scanPath ?? []).map(reindex),
+        orbitDefJson: mission.orbit
+          ? JSON.stringify({
+              axisBottom: mission.orbit.axisBottom,
+              axisTop: mission.orbit.axisTop,
+              radius: mission.orbit.radius,
+              params: mission.orbit.params,
+            })
+          : undefined,
+      },
+    ];
+  }
   return [{ waylineId: 0, waypoints: mission.waypoints.map(reindex) }];
 }
 
@@ -73,6 +91,12 @@ function reindex(wp: Waypoint, idx: number): Waypoint {
 function xmlEscape(s: string | undefined): string {
   if (!s) return '';
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/** 给 orbit Folder 序列化 OrbitDef JSON（含 axis / radius / params） */
+function orbitMetaXml(seg: WaylineSegment): string {
+  if (!seg.orbitDefJson) return '';
+  return `\n      <wpml:dualgazeOrbitDef>${xmlEscape(seg.orbitDefJson)}</wpml:dualgazeOrbitDef>`;
 }
 
 /** 给 facade Folder 序列化 face 元数据（id/name/4 角点/params JSON）—— 让 import lossless 还原 */
@@ -156,7 +180,7 @@ function buildTemplateFolder(
   polygonPlacemarkXml: string,
   scanParamsXml: string,
 ): string {
-  const faceMetaXml = facadeFaceMetaXml(seg);
+  const faceMetaXml = facadeFaceMetaXml(seg) + orbitMetaXml(seg);
   const takeOffPointXml = buildTakeOffPointXml(mission, seg);
   return `    <Folder>
       <wpml:templateType>waypoint</wpml:templateType>
@@ -263,7 +287,7 @@ function buildWaylineFolder(
     mission.globalSpeed > 0
       ? Math.round(parseFloat(distance) / mission.globalSpeed)
       : 0;
-  const faceMetaXml = facadeFaceMetaXml(seg);
+  const faceMetaXml = facadeFaceMetaXml(seg) + orbitMetaXml(seg);
   const takeOffPointXml = buildTakeOffPointXml(mission, seg);
   const placemarks = seg.waypoints
     .map((wp, i, all) =>

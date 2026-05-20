@@ -18,6 +18,7 @@ import {
   FACADE_DEFAULTS,
   MAPPING_DEFAULTS,
   MISSION_DEFAULTS,
+  ORBIT_DEFAULTS,
   PAYLOAD_CATALOG,
   type ExitOnRCLost,
   type FacadeCorner,
@@ -30,6 +31,7 @@ import {
   type MappingScanParams,
   type Mission,
   type MissionType,
+  type OrbitDef,
   type PolygonVertex,
   type RCLostAction,
   type Waypoint,
@@ -103,7 +105,9 @@ export async function importKmzToMission(file: File): Promise<KmzImportResult> {
       .find((t) => t !== null) as MissionType | null) ?? null;
   const polygon = parsePolygonFromDoc(doc);
   const scanParams = parseScanParamsFromDoc(doc);
-  const isMapping = declaredType === 'mapping' || (declaredType !== 'facade' && polygon.length >= 3);
+  const isOrbit = declaredType === 'orbit';
+  const isMapping =
+    !isOrbit && (declaredType === 'mapping' || (declaredType !== 'facade' && polygon.length >= 3));
   const isFacade = declaredType === 'facade';
 
   // DualGaze 自定义字段（lossless round-trip）
@@ -122,7 +126,13 @@ export async function importKmzToMission(file: File): Promise<KmzImportResult> {
     'm3e-cam';
 
   // 构建 mission
-  const missionType: MissionType = isFacade ? 'facade' : isMapping ? 'mapping' : 'patrol';
+  const missionType: MissionType = isOrbit
+    ? 'orbit'
+    : isFacade
+      ? 'facade'
+      : isMapping
+        ? 'mapping'
+        : 'patrol';
   const baseMission = createBlankMission({
     name: deriveMissionName(file.name),
     type: missionType,
@@ -145,6 +155,30 @@ export async function importKmzToMission(file: File): Promise<KmzImportResult> {
   if (isMapping) {
     mission.polygon = polygon;
     mission.scanParams = scanParams ?? { ...MAPPING_DEFAULTS };
+  }
+
+  if (isOrbit) {
+    // orbit 单 wayline：从 dualgazeOrbitDef JSON 还原；fail-safe fallback 用 Placemark 推断
+    const orbitDefJson = readText(folder, 'wpml:dualgazeOrbitDef');
+    let orbit = parseOrbitDef(orbitDefJson);
+    if (!orbit) {
+      warnings.push('未找到 dualgazeOrbitDef JSON，orbit 几何无法还原');
+    }
+    if (orbit) {
+      // 用本地算法重算 scanPath（不信任 KMZ 里的航点）
+      const placemarks = Array.from(doc.getElementsByTagName('Placemark'));
+      const importedPath = parseWaypointsFromPlacemarks(
+        placemarks,
+        mission.globalSpeed,
+        mission.globalAction,
+        warnings,
+      );
+      orbit = { ...orbit, scanPath: importedPath };
+    }
+    mission.orbit = orbit ?? undefined;
+    mission.waypoints = [];
+    mission.updatedAt = Date.now();
+    return { mission, warnings };
   }
 
   if (isFacade) {
@@ -284,6 +318,23 @@ function parseFaceParams(text: string | null): FacadeScanParams {
     return { ...FACADE_DEFAULTS, ...parsed };
   } catch {
     return { ...FACADE_DEFAULTS };
+  }
+}
+
+/** 解析 OrbitDef JSON；缺字段用 ORBIT_DEFAULTS 兜底 */
+function parseOrbitDef(text: string | null): OrbitDef | null {
+  if (!text) return null;
+  try {
+    const j = JSON.parse(text) as Partial<OrbitDef>;
+    if (!j.axisBottom || !j.axisTop || typeof j.radius !== 'number') return null;
+    return {
+      axisBottom: j.axisBottom,
+      axisTop: j.axisTop,
+      radius: j.radius,
+      params: { ...ORBIT_DEFAULTS, ...(j.params ?? {}) },
+    };
+  } catch {
+    return null;
   }
 }
 

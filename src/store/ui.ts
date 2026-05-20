@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type RightSheetTab = 'waypoints' | 'config' | 'actions' | 'scan' | 'faces';
+export type RightSheetTab = 'waypoints' | 'config' | 'actions' | 'scan' | 'faces' | 'orbit';
 export type LibrarySort = 'updated_desc' | 'updated_asc' | 'name';
 export type MapView = '3d' | '2d';
 /**
@@ -8,7 +8,7 @@ export type MapView = '3d' | '2d';
  *  - 'idle': 默认（WaypointPicker / PolygonPicker 由各自的 layer 自行接管）
  *  - 'facade-draw': facade mission 内点 "新建立面" 进入 4 角拾取
  */
-export type PickerMode = 'idle' | 'facade-draw';
+export type PickerMode = 'idle' | 'facade-draw' | 'orbit-draw';
 
 interface UiState {
   createModalOpen: boolean;

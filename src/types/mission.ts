@@ -5,10 +5,10 @@
  * 这样 KMZ 导出 / DJI Pilot 2 / FlightHub 2 看到的坐标都是 GPS 标准。
  */
 
-export type MissionType = 'patrol' | 'mapping' | 'strip' | 'facade';
+export type MissionType = 'patrol' | 'mapping' | 'strip' | 'facade' | 'orbit';
 
-/** v3 启用 'patrol' + 'mapping' + 'facade'；strip 仍 disabled */
-export const ENABLED_MISSION_TYPES: ReadonlySet<MissionType> = new Set(['patrol', 'mapping', 'facade']);
+/** v3.1 启用 'patrol' + 'mapping' + 'facade' + 'orbit'；strip 仍 disabled */
+export const ENABLED_MISSION_TYPES: ReadonlySet<MissionType> = new Set(['patrol', 'mapping', 'facade', 'orbit']);
 
 export interface MissionTypeMeta {
   id: MissionType;
@@ -45,6 +45,13 @@ export const MISSION_TYPE_CATALOG: ReadonlyArray<MissionTypeMeta> = [
     label: '贴近摄影航线',
     description: '3DTiles 立面 · 多面 S 扫描',
     iconName: 'scan-eye',
+    disabled: false,
+  },
+  {
+    id: 'orbit',
+    label: '环绕摄影航线',
+    description: '塔状目标多圈环绕 · 相机始终朝主轴',
+    iconName: 'target',
     disabled: false,
   },
 ];
@@ -256,6 +263,39 @@ export interface FacadeFace {
   enabled: boolean;
 }
 
+/** v3.1 orbit 扫描参数（不含速度，速度走 mission.globalSpeed） */
+export interface OrbitScanParams {
+  /** 飞行半径相对物体半径的额外缓冲距离 m（实际飞行半径 = orbit.radius + standoff） */
+  standoff: number;
+  /** 每圈垂直间距 m（决定圈数 = ⌈H / verticalSpacing⌉ + 1） */
+  verticalSpacing: number;
+  /** 每圈航点数（360° 等分；常见 8/12/16/24） */
+  pointsPerRing: number;
+  /** 起始方位角 °（正北=0，CW 递增） */
+  startAngle: number;
+  /** 飞行旋转方向 */
+  direction: 'cw' | 'ccw';
+  /** 底圈相对 axisBottom.alt 的高度偏移 m（正值=离地高些避碰） */
+  bottomAltOffset: number;
+  /** 顶圈相对 axisTop.alt 的高度偏移 m（负值=留安全余量） */
+  topAltOffset: number;
+  /** 偶数圈是否反向 → 上下圈衔接走最短弧（"蛇形上升"） */
+  flipRingDirection: boolean;
+}
+
+/** v3.1 orbit 几何 + 扫描结果 */
+export interface OrbitDef {
+  /** 主轴底端（一般在地面靠塔的点） */
+  axisBottom: { lon: number; lat: number; alt: number };
+  /** 主轴顶端（一般在塔尖 / 屋顶） */
+  axisTop: { lon: number; lat: number; alt: number };
+  /** 测量得到的物体半径 m（picker 第 ③ 点到 axis 的水平距离） */
+  radius: number;
+  params: OrbitScanParams;
+  /** 算出来的扫描航点 */
+  scanPath?: Waypoint[];
+}
+
 /** facade 3DTiles 数据源 */
 export interface TilesetSource {
   /** http = Cesium3DTileset.fromUrl；localDir = M17 webkitdirectory + Resource 拦截 */
@@ -299,6 +339,8 @@ export interface Mission {
   activeFaceId?: string | null;
   /** v3 facade 类型：3DTiles 数据源（HTTP URL 或本地目录 session） */
   tilesetSource?: TilesetSource;
+  /** v3.1 orbit 类型：1 mission = 1 orbit；同 tilesetSource 共用（orbit 也要 tileset 才能拾点 + raycast） */
+  orbit?: OrbitDef;
   /** 安全起飞高度 m（执行任务前先爬升到此高度才进入航线，DJI WPML takeOffSecurityHeight） */
   takeOffSecurityHeight: number;
   /** 飞向首航点模式：安全模式（先到首航点正上方再下降）/ 点对点直飞 */
@@ -339,6 +381,18 @@ export const MAPPING_DEFAULTS: MappingScanParams = {
   gimbalPitchAngle: -45,
   overlapH: 0.8,
   overlapW: 0.7,
+};
+
+/** v3.1 orbit 扫描参数默认值 */
+export const ORBIT_DEFAULTS: OrbitScanParams = {
+  standoff: 8,
+  verticalSpacing: 3,
+  pointsPerRing: 16,
+  startAngle: 0,
+  direction: 'cw',
+  bottomAltOffset: 1,
+  topAltOffset: -1,
+  flipRingDirection: true,
 };
 
 /** v3 facade 扫描参数默认值 */
@@ -406,6 +460,10 @@ export function createBlankMission(init: {
     base.activeFaceId = null;
     base.tilesetSource = undefined;
   }
+  if (init.type === 'orbit') {
+    base.orbit = undefined; // 等 picker 拾完 3 点才建
+    base.tilesetSource = undefined;
+  }
   return base;
 }
 
@@ -447,6 +505,23 @@ export function migrateMissionToLatest(m: Partial<Mission> & Pick<Mission, 'id' 
     // 旧 mission 没存 activeFaceId → 选第一个有 scanPath 的 face；都没有就 null
     const firstFaceId = next.facadeFaces?.find((f) => f.enabled !== false)?.id ?? null;
     next.activeFaceId = m.activeFaceId !== undefined ? m.activeFaceId : firstFaceId;
+  }
+  if (next.type === 'orbit') {
+    next.tilesetSource = m.tilesetSource;
+    if (m.orbit) {
+      next.orbit = {
+        ...m.orbit,
+        params: { ...ORBIT_DEFAULTS, ...(m.orbit.params ?? {}) },
+        scanPath: Array.isArray(m.orbit.scanPath)
+          ? m.orbit.scanPath.map((wp) => ({
+              ...wp,
+              actions: Array.isArray(wp.actions) ? wp.actions : [],
+            }))
+          : undefined,
+      };
+    } else {
+      next.orbit = undefined;
+    }
   }
   return next;
 }

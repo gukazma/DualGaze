@@ -199,7 +199,7 @@ export function TopBar() {
   );
 }
 
-function MissionTypeChip({ type }: { type: 'patrol' | 'mapping' | 'strip' | 'facade' }) {
+function MissionTypeChip({ type }: { type: 'patrol' | 'mapping' | 'strip' | 'facade' | 'orbit' }) {
   if (type === 'mapping') {
     return (
       <span className="rounded-sm bg-[#0a2b22] px-1.5 py-0.5 text-[9px] font-semibold text-accent-cyan">
@@ -211,6 +211,13 @@ function MissionTypeChip({ type }: { type: 'patrol' | 'mapping' | 'strip' | 'fac
     return (
       <span className="rounded-sm bg-[#0a2b3c] px-1.5 py-0.5 text-[9px] font-semibold text-accent-cyan">
         贴近航线
+      </span>
+    );
+  }
+  if (type === 'orbit') {
+    return (
+      <span className="rounded-sm bg-[#1c0a3c] px-1.5 py-0.5 text-[9px] font-semibold text-[#a64aff]">
+        环绕航线
       </span>
     );
   }

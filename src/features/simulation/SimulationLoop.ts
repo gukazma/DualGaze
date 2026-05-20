@@ -119,6 +119,9 @@ interface Segment {
  */
 export function effectiveWaypoints(mission: Mission): Waypoint[] {
   if (mission.type === 'mapping') return mission.scanPath ?? [];
+  if (mission.type === 'orbit') {
+    return (mission.orbit?.scanPath ?? []).map((wp, idx) => ({ ...wp, index: idx }));
+  }
   if (mission.type === 'facade') {
     // 对齐 DPGO：1 face = 1 wayline = 1 架次。模拟飞行 / 段时序 / sim 入口 disabled
     // 判定都基于 activeFaceId 那一面，不再 concat 所有 face。
