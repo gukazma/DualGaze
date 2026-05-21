@@ -216,7 +216,7 @@ function MissionTypeChip({ type }: { type: 'patrol' | 'mapping' | 'strip' | 'fac
   }
   if (type === 'orbit') {
     return (
-      <span className="rounded-sm bg-[#1c0a3c] px-1.5 py-0.5 text-[9px] font-semibold text-[#a64aff]">
+      <span className="rounded-sm bg-[#2a2113] px-1.5 py-0.5 text-[9px] font-semibold text-[#ffd24a]">
         环绕航线
       </span>
     );

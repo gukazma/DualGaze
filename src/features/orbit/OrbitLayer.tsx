@@ -7,8 +7,8 @@ import { useUiStore } from '../../store/ui';
 import { wgs84ToCartesian3 } from '../../lib/coord';
 import type { OrbitDef, Waypoint } from '../../types/mission';
 
-const COLOR_ORBIT = Cesium.Color.fromCssColorString('#a64aff');
-const COLOR_AXIS_PICK = Cesium.Color.fromCssColorString('#a64aff');
+const COLOR_ORBIT = Cesium.Color.fromCssColorString('#ffd24a');
+const COLOR_AXIS_PICK = Cesium.Color.fromCssColorString('#ffd24a');
 const COLOR_CURSOR = Cesium.Color.fromCssColorString('#ffd24a');
 
 /**

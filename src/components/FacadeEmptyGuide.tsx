@@ -8,7 +8,7 @@ import { useCurrentMission } from '../store/missions';
  * 条件：`(facade || orbit) && !tilesetSource`。
  * 文案 + 图标 + 边框颜色根据 mission.type 切换：
  *   - facade: 青色边框 + ScanEye 图标 + "贴近摄影需要在三维模型上指定立面"
- *   - orbit:  紫色边框 + Target 图标 + "环绕摄影需要在三维模型上拾取塔轴"
+ *   - orbit:  黄色边框 + Target 图标 + "环绕摄影需要在三维模型上拾取塔轴"
  */
 export function FacadeEmptyGuide() {
   const mission = useCurrentMission();
@@ -17,12 +17,12 @@ export function FacadeEmptyGuide() {
     <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
       <div
         className={`pointer-events-auto w-[480px] rounded-xl border bg-bg-panel/95 p-6 shadow-2xl backdrop-blur-sm ${
-          isOrbit ? 'border-[#a64aff]' : 'border-accent'
+          isOrbit ? 'border-[#ffd24a]' : 'border-accent'
         }`}
       >
         <div className="mb-4 flex justify-center">
           {isOrbit ? (
-            <Target className="h-7 w-7 text-[#a64aff]" />
+            <Target className="h-7 w-7 text-[#ffd24a]" />
           ) : (
             <ScanEye className="h-7 w-7 text-accent-cyan" />
           )}

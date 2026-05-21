@@ -7,7 +7,7 @@ import { cn } from '../lib/utils';
 /**
  * Orbit picker 顶部浮条。3 步拾取进度 + preview 状态参数摘要 + 反转/保存 按钮。
  *
- * 紫色品牌 `#a64aff` 区分 facade 的青色 HUD。
+ * 紫色品牌 `#ffd24a` 区分 facade 的青色 HUD。
  */
 export function OrbitPickerHud() {
   const pickerMode = useUiStore((s) => s.pickerMode);
@@ -47,7 +47,7 @@ export function OrbitPickerHud() {
           'pointer-events-auto flex h-10 items-center gap-2.5 rounded-md border bg-bg-panel/95 px-3 text-[12px] font-semibold shadow-lg backdrop-blur-sm',
           isError
             ? 'border-accent-danger text-accent-danger'
-            : 'border-[#a64aff] text-text-primary',
+            : 'border-[#ffd24a] text-text-primary',
         )}
       >
         {!isPreview && !isError && (
@@ -61,7 +61,7 @@ export function OrbitPickerHud() {
                   className={cn(
                     'flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold',
                     done
-                      ? 'bg-[#a64aff]/80 text-bg'
+                      ? 'bg-[#ffd24a]/80 text-bg'
                       : active
                         ? 'bg-accent text-bg'
                         : 'bg-bg-input text-text-muted',
@@ -74,7 +74,7 @@ export function OrbitPickerHud() {
           </div>
         )}
 
-        {isPreview && <CircleCheck className="h-4 w-4 text-[#a64aff]" />}
+        {isPreview && <CircleCheck className="h-4 w-4 text-[#ffd24a]" />}
         {isError && <AlertCircle className="h-4 w-4" />}
 
         <span>{stepText}</span>
@@ -85,7 +85,7 @@ export function OrbitPickerHud() {
               <button
                 type="button"
                 onClick={() => flipPreviewDirection?.()}
-                className="flex items-center gap-1 rounded-sm border border-[#a64aff] bg-[#a64aff]/10 px-2 py-0.5 text-[11px] font-bold text-[#a64aff] hover:bg-[#a64aff]/20"
+                className="flex items-center gap-1 rounded-sm border border-[#ffd24a] bg-[#ffd24a]/10 px-2 py-0.5 text-[11px] font-bold text-[#ffd24a] hover:bg-[#ffd24a]/20"
                 title="反转飞行方向 cw↔ccw（F 同效）"
               >
                 <RotateCw className="h-3 w-3" />

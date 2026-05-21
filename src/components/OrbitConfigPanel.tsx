@@ -20,7 +20,7 @@ export function OrbitConfigPanel() {
       <div className="flex h-full items-center justify-center px-6">
         <div className="rounded-md border border-dashed border-border-subtle p-4 text-center text-[11px] text-text-muted">
           还没有环绕几何 · 在主视图点{' '}
-          <span className="font-bold text-[#a64aff]">+ 开始绘制环绕</span>{' '}
+          <span className="font-bold text-[#ffd24a]">+ 开始绘制环绕</span>{' '}
           按 3 点定塔轴 + 半径
         </div>
       </div>
@@ -43,9 +43,9 @@ export function OrbitConfigPanel() {
     <ScrollArea className="h-full">
       <div className="flex flex-col gap-3 p-3">
         {/* 摘要卡 */}
-        <div className="rounded-md border border-[#a64aff]/30 bg-[#1c0a3c]/40 p-3">
+        <div className="rounded-md border border-[#ffd24a]/30 bg-[#2a2113]/40 p-3">
           <div className="flex items-center gap-2 text-[12px] font-bold text-text-primary">
-            <Target className="h-4 w-4 text-[#a64aff]" />
+            <Target className="h-4 w-4 text-[#ffd24a]" />
             圆柱 R={orbit.radius.toFixed(1)}m · H={totalH.toFixed(1)}m
           </div>
           <div className="mt-1 text-[11px] text-text-secondary">
@@ -68,7 +68,7 @@ export function OrbitConfigPanel() {
             step={0.5}
             value={params.standoff}
             onChange={(e) => updateOrbitParams({ standoff: parseFloat(e.target.value) })}
-            className="w-full accent-[#a64aff]"
+            className="w-full accent-[#ffd24a]"
           />
         </RangeRow>
 
@@ -86,7 +86,7 @@ export function OrbitConfigPanel() {
             onChange={(e) =>
               updateOrbitParams({ verticalSpacing: parseFloat(e.target.value) })
             }
-            className="w-full accent-[#a64aff]"
+            className="w-full accent-[#ffd24a]"
           />
         </RangeRow>
 
@@ -104,7 +104,7 @@ export function OrbitConfigPanel() {
             onChange={(e) =>
               updateOrbitParams({ pointsPerRing: parseInt(e.target.value, 10) })
             }
-            className="w-full accent-[#a64aff]"
+            className="w-full accent-[#ffd24a]"
           />
         </RangeRow>
 
@@ -120,7 +120,7 @@ export function OrbitConfigPanel() {
             step={1}
             value={params.startAngle}
             onChange={(e) => updateOrbitParams({ startAngle: parseInt(e.target.value, 10) })}
-            className="w-full accent-[#a64aff]"
+            className="w-full accent-[#ffd24a]"
           />
         </RangeRow>
 
@@ -133,7 +133,7 @@ export function OrbitConfigPanel() {
               className={cn(
                 'flex items-center gap-1 rounded px-2 py-1 text-[11px] font-semibold',
                 params.direction === 'cw'
-                  ? 'bg-[#a64aff] text-bg'
+                  ? 'bg-[#ffd24a] text-bg'
                   : 'text-text-secondary hover:text-text-primary',
               )}
             >
@@ -145,7 +145,7 @@ export function OrbitConfigPanel() {
               className={cn(
                 'flex items-center gap-1 rounded px-2 py-1 text-[11px] font-semibold',
                 params.direction === 'ccw'
-                  ? 'bg-[#a64aff] text-bg'
+                  ? 'bg-[#ffd24a] text-bg'
                   : 'text-text-secondary hover:text-text-primary',
               )}
             >
@@ -163,7 +163,7 @@ export function OrbitConfigPanel() {
             }
             className={cn(
               'relative h-5 w-9 rounded-full transition-colors',
-              params.flipRingDirection ? 'bg-[#a64aff]' : 'bg-bg-input',
+              params.flipRingDirection ? 'bg-[#ffd24a]' : 'bg-bg-input',
             )}
             aria-pressed={params.flipRingDirection}
           >
@@ -195,7 +195,7 @@ export function OrbitConfigPanel() {
               onChange={(e) =>
                 updateOrbitParams({ bottomAltOffset: parseFloat(e.target.value) })
               }
-              className="w-full accent-[#a64aff]"
+              className="w-full accent-[#ffd24a]"
             />
           </RangeRow>
           <RangeRow
@@ -212,7 +212,7 @@ export function OrbitConfigPanel() {
               onChange={(e) =>
                 updateOrbitParams({ topAltOffset: parseFloat(e.target.value) })
               }
-              className="w-full accent-[#a64aff]"
+              className="w-full accent-[#ffd24a]"
             />
           </RangeRow>
         </div>
@@ -225,7 +225,7 @@ export function OrbitConfigPanel() {
               direction: params.direction === 'cw' ? 'ccw' : 'cw',
             })
           }
-          className="mt-2 flex h-9 items-center justify-center gap-2 rounded-md border border-[#a64aff] bg-[#1c0a3c] text-[12px] font-bold text-[#a64aff] hover:bg-[#1c0a3c]/70"
+          className="mt-2 flex h-9 items-center justify-center gap-2 rounded-md border border-[#ffd24a] bg-[#2a2113] text-[12px] font-bold text-[#ffd24a] hover:bg-[#2a2113]/70"
         >
           <RotateCw className="h-3.5 w-3.5" />
           反转方向（cw ↔ ccw）

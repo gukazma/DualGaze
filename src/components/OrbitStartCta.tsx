@@ -12,7 +12,7 @@ export function OrbitStartCta() {
     <button
       type="button"
       onClick={() => setPickerMode('orbit-draw')}
-      className="group absolute bottom-4 right-4 z-20 flex h-[72px] w-[260px] items-center gap-3 rounded-xl bg-[#a64aff] px-4 text-left shadow-2xl shadow-[#a64aff]/40 transition-transform hover:scale-[1.02]"
+      className="group absolute bottom-4 right-4 z-20 flex h-[72px] w-[260px] items-center gap-3 rounded-xl bg-[#ffd24a] px-4 text-left shadow-2xl shadow-[#ffd24a]/40 transition-transform hover:scale-[1.02]"
     >
       <Target className="h-6 w-6 shrink-0 text-bg" />
       <div className="flex-1">
