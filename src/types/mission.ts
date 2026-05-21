@@ -341,6 +341,12 @@ export interface Mission {
   tilesetSource?: TilesetSource;
   /** v3.1 orbit 类型：1 mission = 1 orbit；同 tilesetSource 共用（orbit 也要 tileset 才能拾点 + raycast） */
   orbit?: OrbitDef;
+  /**
+   * v3.2 起飞点（facade / orbit 强制设；patrol / mapping 不动）。
+   * 用户在 3DTiles 表面 3D pick 1 点。设置后 KMZ 导出改用 relativeToStartPoint。
+   * internal scanPath 仍存 WGS84 绝对 alt；只在 KMZ export/import 时做换算。
+   */
+  takeOffPoint?: { lon: number; lat: number; alt: number };
   /** 安全起飞高度 m（执行任务前先爬升到此高度才进入航线，DJI WPML takeOffSecurityHeight） */
   takeOffSecurityHeight: number;
   /** 飞向首航点模式：安全模式（先到首航点正上方再下降）/ 点对点直飞 */

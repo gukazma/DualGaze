@@ -108,6 +108,14 @@ interface MissionsState {
    */
   commitFacadePreviewIfAny: () => boolean;
 
+  // ---------- takeoff (v3.2) ----------
+  /**
+   * 设置 / 清除当前 mission 的起飞点。
+   * 仅在 facade / orbit 类型有意义；其它类型调用静默 no-op（保留旧 WGS84 行为）。
+   * undefined = 清除（场景里 home icon 消失，KMZ 退回 WGS84）。
+   */
+  setTakeOffPoint: (pt: { lon: number; lat: number; alt: number } | undefined) => void;
+
   // ---------- orbit ----------
   /** 设置 / 替换当前 mission 的 orbit 几何（picker 完成后调）；params 用默认或现有 */
   setOrbit: (orbit: OrbitDef | undefined) => void;
@@ -461,6 +469,13 @@ export const useMissionsStore = create<MissionsState>()(
           useFacadePickerStore.getState().setState({ mode: 'drawing', corners: [] });
           return true;
         },
+
+        // ---------- takeoff (v3.2) ----------
+        setTakeOffPoint: (pt) =>
+          updCurrent((m) => {
+            if (m.type !== 'facade' && m.type !== 'orbit') return m;
+            return { ...m, takeOffPoint: pt };
+          }),
 
         // ---------- orbit ----------
         setOrbit: (orbit) =>

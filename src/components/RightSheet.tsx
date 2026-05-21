@@ -7,6 +7,7 @@ import { MappingScanList } from './MappingScanList';
 import { FacadeFaceList } from './FacadeFaceList';
 import { FacadeScanList } from './FacadeScanList';
 import { OrbitConfigPanel } from './OrbitConfigPanel';
+import { TakeoffStatusRow } from './TakeoffStatusRow';
 import { useCurrentMission } from '../store/missions';
 import { useUiStore, type RightSheetTab } from '../store/ui';
 import { cn } from '../lib/utils';
@@ -14,7 +15,7 @@ import { cn } from '../lib/utils';
 const TAB_CLS =
   'h-full rounded-none border-b-2 border-transparent text-[12px] data-[state=active]:border-accent data-[state=active]:bg-transparent data-[state=active]:text-accent data-[state=active]:shadow-none';
 const TAB_CLS_ORBIT =
-  'h-full rounded-none border-b-2 border-transparent text-[12px] data-[state=active]:border-[#a64aff] data-[state=active]:bg-transparent data-[state=active]:text-[#a64aff] data-[state=active]:shadow-none';
+  'h-full rounded-none border-b-2 border-transparent text-[12px] data-[state=active]:border-[#ffd24a] data-[state=active]:bg-transparent data-[state=active]:text-[#ffd24a] data-[state=active]:shadow-none';
 
 export function RightSheet() {
   const mission = useCurrentMission();
@@ -70,6 +71,8 @@ export function RightSheet() {
           )}
         </div>
       </div>
+
+      {(isFacade || isOrbit) && <TakeoffStatusRow />}
 
       {mission ? (
         <Tabs

@@ -19,12 +19,38 @@ import JSZip from 'jszip';
 import {
   DRONE_CATALOG,
   PAYLOAD_CATALOG,
+  type HeightMode,
   type MappingScanParams,
   type Mission,
   type PolygonVertex,
   type Waypoint,
   type WaypointAction,
 } from '../types/mission';
+
+/**
+ * v3.2 takeOffPoint 换算：
+ * - facade / orbit + mission.takeOffPoint 存在 → 强制 relativeToStartPoint，
+ *   executeHeight = wp.alt - takeOffPoint.alt（KMZ store alt 仍是 WGS84 椭球高）
+ * - 其它 → 走 mission.heightMode（旧行为）
+ */
+function hasMissionTakeOff(mission: Mission): boolean {
+  return (
+    (mission.type === 'facade' || mission.type === 'orbit') &&
+    !!mission.takeOffPoint
+  );
+}
+
+function effectiveHeightMode(mission: Mission): HeightMode {
+  if (hasMissionTakeOff(mission)) return 'relativeToStartPoint';
+  return mission.heightMode;
+}
+
+function effectiveExecuteHeight(mission: Mission, wp: Waypoint): number {
+  if (hasMissionTakeOff(mission)) {
+    return wp.alt - mission.takeOffPoint!.alt;
+  }
+  return wp.alt;
+}
 
 /**
  * 一个架次（wayline）。facade mission 一面 = 一架次；其它 mission 整条 = 一架次。
@@ -188,24 +214,24 @@ function buildTemplateFolder(
       <wpml:templateId>${seg.waylineId}</wpml:templateId>${faceMetaXml}
       <wpml:waylineCoordinateSysParam>
         <wpml:coordinateMode>WGS84</wpml:coordinateMode>
-        <wpml:heightMode>${mission.heightMode}</wpml:heightMode>
+        <wpml:heightMode>${effectiveHeightMode(mission)}</wpml:heightMode>
       </wpml:waylineCoordinateSysParam>
       <wpml:autoFlightSpeed>${mission.globalSpeed}</wpml:autoFlightSpeed>${takeOffPointXml}
       <wpml:globalWaypointTurnMode>toPointAndStopWithDiscontinuityCurvature</wpml:globalWaypointTurnMode>
       <wpml:globalUseStraightLine>1</wpml:globalUseStraightLine>
-${polygonPlacemarkXml}${seg.waypoints.map((wp, i) => buildTemplatePlacemark(wp, i)).join('\n')}
+${polygonPlacemarkXml}${seg.waypoints.map((wp, i) => buildTemplatePlacemark(wp, i, mission)).join('\n')}
       <wpml:dualgazeIsClosedLoop>${mission.isClosedLoop ? 1 : 0}</wpml:dualgazeIsClosedLoop>
       <wpml:dualgazeGlobalAction>${mission.globalAction}</wpml:dualgazeGlobalAction>
 ${scanParamsXml}    </Folder>`;
 }
 
-function buildTemplatePlacemark(wp: Waypoint, index: number): string {
+function buildTemplatePlacemark(wp: Waypoint, index: number, mission: Mission): string {
   return `      <Placemark>
         <Point>
           <coordinates>${wp.lon.toFixed(7)},${wp.lat.toFixed(7)}</coordinates>
         </Point>
         <wpml:index>${index}</wpml:index>
-        <wpml:executeHeight>${wp.alt}</wpml:executeHeight>
+        <wpml:executeHeight>${effectiveExecuteHeight(mission, wp)}</wpml:executeHeight>
         <wpml:waypointSpeed>${wp.speed}</wpml:waypointSpeed>
         <wpml:waypointHeadingParam>
           <wpml:waypointHeadingMode>smoothTransition</wpml:waypointHeadingMode>
@@ -291,7 +317,7 @@ function buildWaylineFolder(
   const takeOffPointXml = buildTakeOffPointXml(mission, seg);
   const placemarks = seg.waypoints
     .map((wp, i, all) =>
-      buildWaylinePlacemark(wp, i, all.length, mission.globalAction, isMapping),
+      buildWaylinePlacemark(wp, i, all.length, mission.globalAction, isMapping, mission),
     )
     .join('\n');
 
@@ -302,7 +328,7 @@ function buildWaylineFolder(
       <wpml:distance>${distance}</wpml:distance>
       <wpml:duration>${duration}</wpml:duration>
       <wpml:autoFlightSpeed>${mission.globalSpeed}</wpml:autoFlightSpeed>
-      <wpml:executeHeightMode>${mission.heightMode}</wpml:executeHeightMode>${takeOffPointXml}
+      <wpml:executeHeightMode>${effectiveHeightMode(mission)}</wpml:executeHeightMode>${takeOffPointXml}
 ${startActionXml}${polygonPlacemarkXml}${placemarks}
       <wpml:dualgazeIsClosedLoop>${mission.isClosedLoop ? 1 : 0}</wpml:dualgazeIsClosedLoop>
       <wpml:dualgazeGlobalAction>${mission.globalAction}</wpml:dualgazeGlobalAction>
@@ -315,6 +341,7 @@ function buildWaylinePlacemark(
   total: number,
   globalAction: Mission['globalAction'],
   isMapping: boolean,
+  mission: Mission,
 ): string {
   const isEndpoint = index === 0 || index === total - 1;
   const turnMode = isEndpoint
@@ -338,7 +365,7 @@ function buildWaylinePlacemark(
           <coordinates>${wp.lon.toFixed(7)},${wp.lat.toFixed(7)}</coordinates>
         </Point>
         <wpml:index>${index}</wpml:index>
-        <wpml:executeHeight>${wp.alt}</wpml:executeHeight>
+        <wpml:executeHeight>${effectiveExecuteHeight(mission, wp)}</wpml:executeHeight>
         <wpml:waypointSpeed>${wp.speed}</wpml:waypointSpeed>
         <wpml:waypointHeadingParam>
           <wpml:waypointHeadingMode>smoothTransition</wpml:waypointHeadingMode>
@@ -405,8 +432,23 @@ function buildActionXml(action: WaypointAction, id: number): string {
 }
 
 function buildTakeOffPointXml(mission: Mission, seg: WaylineSegment): string {
-  // facade 多架次场景下，每架次的 takeOffPoint 用该 face 自己的首航点（操作员在
-  // 那栋楼 / 那一面附近起飞，参考 height 也对应该 face）。其它 mission 用整条路径首点。
+  // v3.2 优先用 mission.takeOffPoint（facade / orbit 由用户主动 pick 的全局起飞点，
+  // 一个 mission 一个，多架次共用）。设了 → 所有 Folder 都写同一个 takeOffPoint，
+  // executeHeight 也基于它做减法（见 effectiveExecuteHeight）。
+  if (hasMissionTakeOff(mission)) {
+    const t = mission.takeOffPoint!;
+    return `
+      <wpml:takeOffPoint>
+        <wpml:latitude>${t.lat.toFixed(7)}</wpml:latitude>
+        <wpml:longitude>${t.lon.toFixed(7)}</wpml:longitude>
+        <wpml:height>${t.alt}</wpml:height>
+      </wpml:takeOffPoint>`;
+  }
+  // facade / orbit 没设 takeOffPoint → 不写 takeOff XML，避免 import 端把 wp.alt 错误回算。
+  if (mission.type === 'facade' || mission.type === 'orbit') return '';
+  // patrol / mapping：保留旧逻辑兜底（heightMode != WGS84 时取该架次首点当 anchor）。
+  // 这套数据 round-trip 不是完全对称的（wp.alt 翻倍），但 DJI Pilot 2 端语义 OK。
+  // 修这个 v1 历史 bug 不在 v3.2 范围内。
   if (mission.heightMode === 'WGS84') return '';
   if (seg.waypoints.length === 0) return '';
   const first = seg.waypoints[0];

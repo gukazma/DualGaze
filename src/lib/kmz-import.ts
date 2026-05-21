@@ -98,6 +98,12 @@ export async function importKmzToMission(file: File): Promise<KmzImportResult> {
   const folder = folders[0]; // 第一个用作 mission 级元数据 fallback
   const heightMode = readText(folder, 'wpml:executeHeightMode') as HeightMode | null;
 
+  // v3.2 takeOffPoint：facade / orbit 多架次共用一个 takeOff（export 时所有 Folder 写同一个）
+  // 仅在 facade / orbit + heightMode === 'relativeToStartPoint' 时回算高度。
+  // patrol / mapping 即便 KMZ 里写了 takeOff XML 也不还原——v1/v2 的内部约定是 wp.alt
+  // 全程存 absolute WGS84，export 时不做减法、import 时也不做加法。
+  const takeOffPoint = parseTakeOffPoint(folder);
+
   // 识别 mission 类型：任意一个 Folder 声明 mapping/facade 都算
   const declaredType =
     (folders
@@ -157,6 +163,20 @@ export async function importKmzToMission(file: File): Promise<KmzImportResult> {
     mission.scanParams = scanParams ?? { ...MAPPING_DEFAULTS };
   }
 
+  // 写 takeOffPoint（facade / orbit + relative 时有效）
+  const useRelative =
+    (missionType === 'facade' || missionType === 'orbit') &&
+    heightMode === 'relativeToStartPoint' &&
+    takeOffPoint !== null;
+  const altOffset = useRelative ? takeOffPoint!.height : 0;
+  if (takeOffPoint && (missionType === 'facade' || missionType === 'orbit')) {
+    mission.takeOffPoint = {
+      lon: takeOffPoint.longitude,
+      lat: takeOffPoint.latitude,
+      alt: takeOffPoint.height,
+    };
+  }
+
   if (isOrbit) {
     // orbit 单 wayline：从 dualgazeOrbitDef JSON 还原；fail-safe fallback 用 Placemark 推断
     const orbitDefJson = readText(folder, 'wpml:dualgazeOrbitDef');
@@ -172,6 +192,7 @@ export async function importKmzToMission(file: File): Promise<KmzImportResult> {
         mission.globalSpeed,
         mission.globalAction,
         warnings,
+        altOffset,
       );
       orbit = { ...orbit, scanPath: importedPath };
     }
@@ -202,6 +223,7 @@ export async function importKmzToMission(file: File): Promise<KmzImportResult> {
         mission.globalSpeed,
         mission.globalAction,
         warnings,
+        altOffset,
       );
       faces.push({
         id: faceId,
@@ -227,6 +249,7 @@ export async function importKmzToMission(file: File): Promise<KmzImportResult> {
     mission.globalSpeed,
     mission.globalAction,
     warnings,
+    altOffset,
   );
 
   if (isMapping) {
@@ -247,12 +270,18 @@ export async function importKmzToMission(file: File): Promise<KmzImportResult> {
   return { mission, warnings };
 }
 
-/** 共享给 patrol / facade 的 placemark → Waypoint[] 解析。无 wpml:index 的 Placemark（boundary 等）会被自动跳过。 */
+/**
+ * 共享给 patrol / facade 的 placemark → Waypoint[] 解析。无 wpml:index 的 Placemark（boundary 等）会被自动跳过。
+ *
+ * `altOffset`：v3.2 起飞点 relativeToStartPoint 模式下传 takeOff.height，将 KMZ executeHeight
+ * 回算成 WGS84 椭球高（mission.scanPath / waypoint.alt 全程存绝对值）。WGS84 模式传 0。
+ */
 function parseWaypointsFromPlacemarks(
   placemarks: Element[],
   globalSpeedFallback: number,
   globalAction: GlobalCameraAction,
   warnings: string[],
+  altOffset: number,
 ): Waypoint[] {
   const out: Waypoint[] = [];
   for (let i = 0; i < placemarks.length; i++) {
@@ -271,7 +300,8 @@ function parseWaypointsFromPlacemarks(
       warnings.push(`Placemark #${i} 坐标解析失败: "${coordsText}"`);
       continue;
     }
-    const alt = readNumber(pm, 'wpml:executeHeight') ?? 0;
+    const execHeight = readNumber(pm, 'wpml:executeHeight') ?? 0;
+    const alt = execHeight + altOffset;
     const speed = readNumber(pm, 'wpml:waypointSpeed') ?? globalSpeedFallback;
     const heading = readNumber(pm, 'wpml:waypointHeadingAngle') ?? 0;
     const pitch = readNumber(pm, 'wpml:waypointGimbalPitchAngle') ?? -25;
@@ -319,6 +349,20 @@ function parseFaceParams(text: string | null): FacadeScanParams {
   } catch {
     return { ...FACADE_DEFAULTS };
   }
+}
+
+/** 解析 <wpml:takeOffPoint>（latitude/longitude/height）— 返回 null 表示 KMZ 没写 */
+function parseTakeOffPoint(
+  folder: Element | undefined,
+): { latitude: number; longitude: number; height: number } | null {
+  if (!folder) return null;
+  const el = folder.getElementsByTagName('wpml:takeOffPoint')[0];
+  if (!el) return null;
+  const lat = readNumber(el, 'wpml:latitude');
+  const lon = readNumber(el, 'wpml:longitude');
+  const h = readNumber(el, 'wpml:height');
+  if (lat === null || lon === null || h === null) return null;
+  return { latitude: lat, longitude: lon, height: h };
 }
 
 /** 解析 OrbitDef JSON；缺字段用 ORBIT_DEFAULTS 兜底 */

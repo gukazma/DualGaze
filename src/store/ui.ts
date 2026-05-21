@@ -7,8 +7,10 @@ export type MapView = '3d' | '2d';
  * 当前主场景的拾取交互模式：
  *  - 'idle': 默认（WaypointPicker / PolygonPicker 由各自的 layer 自行接管）
  *  - 'facade-draw': facade mission 内点 "新建立面" 进入 4 角拾取
+ *  - 'orbit-draw': orbit mission 3 点拾取（底心 + 顶心 + 侧点）
+ *  - 'takeoff-pick': v3.2 起飞点单点拾取（facade / orbit 强制流程）
  */
-export type PickerMode = 'idle' | 'facade-draw' | 'orbit-draw';
+export type PickerMode = 'idle' | 'facade-draw' | 'orbit-draw' | 'takeoff-pick';
 
 interface UiState {
   createModalOpen: boolean;
