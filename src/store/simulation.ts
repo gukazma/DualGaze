@@ -7,7 +7,9 @@ export interface DroneState {
   lon: number;
   lat: number;
   alt: number;
-  heading: number; // ° 0=正北
+  heading: number; // ° 0=正北（drone 飞行方向）
+  /** 当前段内进度 0..1（FPV 相机用来 lerp wp 间的 gimbalYaw/pitch） */
+  segProgress?: number;
 }
 
 interface SimulationState {
@@ -38,7 +40,7 @@ interface SimulationState {
   markReached: (waypointId: string) => void;
 }
 
-export const useSimulationStore = create<SimulationState>((set) => ({
+export const useSimulationStore = create<SimulationState>((set, get) => ({
   mode: 'editing',
   running: false,
   speed: 1,
@@ -86,10 +88,13 @@ export const useSimulationStore = create<SimulationState>((set) => ({
   tick: (elapsedMs, droneState, currentSegmentIndex) =>
     set({ elapsedMs, droneState, currentSegmentIndex }),
 
-  markReached: (waypointId) =>
+  markReached: (waypointId) => {
+    // dedup：已 reached 直接返回，避免每帧 new Set() 引发 FrustumLayer 重绘闪烁
+    if (get().reachedWaypointIds.has(waypointId)) return;
     set((s) => {
       const next = new Set(s.reachedWaypointIds);
       next.add(waypointId);
       return { reachedWaypointIds: next };
-    }),
+    });
+  },
 }));

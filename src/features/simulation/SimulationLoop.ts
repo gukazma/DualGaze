@@ -71,6 +71,7 @@ export function useSimulationLoop(): void {
         lat: lerp(seg.from.lat, seg.to.lat, t),
         alt: lerp(seg.from.alt, seg.to.alt, t),
         heading: bearingDeg(seg.from.lon, seg.from.lat, seg.to.lon, seg.to.lat),
+        segProgress: t,
       };
 
       // 抵达逻辑：每帧无条件 mark seg.from（idempotent Set；drone 在它身上即"到过"），

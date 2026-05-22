@@ -44,8 +44,8 @@ export function generateOrbitScanPath(
   const originECEF = wgs84ToCartesian3(axisBottom.lon, axisBottom.lat, axisBottom.alt);
   const enuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(originECEF);
 
-  // axis 中点（在 ENU 局部坐标里就是 (0, 0, midH)）
-  const midH = (axisBottom.alt + axisTop.alt) / 2;
+  // axis 中点（仅供后续可能用；当前 pitch=0 平视不需要）
+  void ((axisBottom.alt + axisTop.alt) / 2);
 
   const waypoints: Waypoint[] = [];
   for (let r = 0; r < ringCount; r++) {
@@ -80,15 +80,13 @@ export function generateOrbitScanPath(
       );
       const wgs = cartesian3ToWgs84(camECEF);
 
-      // 相机看向 axis 中点：在 ENU local 算 lookVector = midAxis - cam
+      // 相机水平看向 axis 中心（DPGO 标准：每圈拍同高度塔身一周环带）
+      // heading = atan2(east, north) 让相机水平指向圆心；pitch = 0 平视
       const lookE = 0 - localE;
       const lookN = 0 - localN;
-      const lookU = midH - axisBottom.alt - localZ;
-      const horiz = Math.sqrt(lookE * lookE + lookN * lookN);
       const headingRad = Math.atan2(lookE, lookN); // 北=0 CW
       const headingDeg = ((Cesium.Math.toDegrees(headingRad) % 360) + 360) % 360;
-      const pitchRad = Math.atan2(lookU, horiz);
-      const pitchDeg = Cesium.Math.toDegrees(pitchRad);
+      const pitchDeg = 0;
 
       const wp = createWaypoint({
         lon: wgs.lon,

@@ -118,16 +118,22 @@ export function FpvViewer() {
       const state = useSimulationStore.getState();
       const d = state.droneState;
       if (!d) return;
-      // 取当前段终点 waypoint 的相机朝向 + 俯仰
-      // - patrol/mapping：wp.heading 通常 = 飞行方向，跟 d.heading 一致
-      // - facade：wp.heading 是相机看墙方向，wp.gimbalYaw 同步（FPV 应该看墙不看飞行方向）
-      // 优先 wp.gimbalYaw（明确的相机 yaw），fallback wp.heading，再 fallback drone 飞行方向
+      // 取当前段 wp[i] → wp[i+1] 两端 gimbal/pitch，按段内进度 lerp，避免 wp 切换瞬时跳变
+      // - patrol/mapping：wp.heading 通常 = 飞行方向
+      // - facade：wp.heading 是相机看墙方向（gimbalYaw 同步）
+      // - orbit：wp.gimbalYaw 指向 axis 中心（每个 wp 不同，必须 lerp 才不闪）
       const m = missionRef.current;
       const segIdx = state.currentSegmentIndex;
       const wps = m ? effectiveWaypoints(m) : [];
+      const fromWp = wps[segIdx];
       const toWp = wps[segIdx + 1] ?? wps[segIdx];
-      const pitchDeg = toWp?.pitch ?? -10;
-      const headingDeg = toWp?.gimbalYaw ?? toWp?.heading ?? d.heading;
+      const t = d.segProgress ?? 1;
+      const fromHd = fromWp?.gimbalYaw ?? fromWp?.heading ?? d.heading;
+      const toHd = toWp?.gimbalYaw ?? toWp?.heading ?? d.heading;
+      const fromPt = fromWp?.pitch ?? -10;
+      const toPt = toWp?.pitch ?? -10;
+      const headingDeg = lerpAngleDeg(fromHd, toHd, t);
+      const pitchDeg = fromPt + (toPt - fromPt) * t;
       v.camera.setView({
         destination: wgs84ToCartesian3(d.lon, d.lat, d.alt),
         orientation: {
@@ -143,4 +149,10 @@ export function FpvViewer() {
   }, []);
 
   return <div ref={containerRef} className="absolute inset-0" />;
+}
+
+/** 角度 lerp（° 单位）：跨 360° 边界走最短弧 */
+function lerpAngleDeg(a: number, b: number, t: number): number {
+  let diff = ((b - a + 540) % 360) - 180;
+  return (a + diff * t + 360) % 360;
 }
