@@ -25,6 +25,9 @@ import {
 import { cn } from '../lib/utils';
 import { useCurrentMission, useMissionsStore } from '../store/missions';
 import { useUiStore } from '../store/ui';
+import { useOvPickerStore } from '../store/ov-picker';
+import { useOvSamplingStore } from '../store/ov-sampling';
+import { OvAoiPicker } from '../features/ov/OvAoiPicker';
 import type { OvCameraSpec, OvDef } from '../types/mission';
 
 type BadgeState = 'pending' | 'configured' | 'computing' | 'done' | 'invalid';
@@ -37,8 +40,17 @@ interface BadgeInfo {
 export function OvConfigPanel() {
   const mission = useCurrentMission();
   const updateOvCameraParams = useMissionsStore((s) => s.updateOvCameraParams);
+  const setOvAoi = useMissionsStore((s) => s.setOvAoi);
+  const setOvSamples = useMissionsStore((s) => s.setOvSamples);
   const setPickerMode = useUiStore((s) => s.setPickerMode);
   const pickerMode = useUiStore((s) => s.pickerMode);
+  const aoiPickerState = useOvPickerStore((s) => s.aoiState);
+  const resetAoiPicker = useOvPickerStore((s) => s.resetAoi);
+  const samplingStatus = useOvSamplingStore((s) => s.status);
+  const samplingProgress = useOvSamplingStore((s) => s.progress);
+  const triggerSampling = useOvSamplingStore((s) => s.trigger);
+  const cancelSampling = useOvSamplingStore((s) => s.cancel);
+  const resetSampling = useOvSamplingStore((s) => s.reset);
 
   if (!mission || mission.type !== 'ov' || !mission.ov) return null;
   const ov = mission.ov;
@@ -58,6 +70,33 @@ export function OvConfigPanel() {
 
   const isPickingTakeoff = pickerMode === 'takeoff-pick';
   const isPickingAoi = pickerMode === 'ov-aoi-pick';
+  const aoiPickerVertexCount =
+    aoiPickerState.mode === 'drawing' || aoiPickerState.mode === 'preview'
+      ? aoiPickerState.vertices.length
+      : 0;
+  const aoiPickerCanCommit = aoiPickerState.mode === 'preview';
+  const aoiCommitted = !!ov.aoi && ov.aoi.vertices.length >= 3;
+
+  const handleStartAoiPick = (): void => {
+    resetAoiPicker();
+    setPickerMode('ov-aoi-pick');
+  };
+  const handleCancelAoiPick = (): void => {
+    resetAoiPicker();
+    setPickerMode('idle');
+  };
+  const handleCommitAoiPick = (): void => {
+    OvAoiPicker.commitPreview();
+  };
+  const handleClearAoi = (): void => {
+    setOvAoi(undefined);
+    setOvSamples(undefined);
+  };
+
+  const handleStartSampling = (): void => {
+    resetSampling();
+    triggerSampling();
+  };
 
   return (
     <div className="flex flex-col gap-2.5">
@@ -95,24 +134,55 @@ export function OvConfigPanel() {
 
         {/* AOI 多边形 */}
         <Row label="AOI 多边形">
-          {ov.aoi && ov.aoi.vertices.length >= 3 ? (
-            <span className="rounded border border-accent bg-[#2a2113] px-2 py-1 text-[11px] font-mono text-accent">
-              {ov.aoi.vertices.length} 顶点
-            </span>
+          {isPickingAoi ? (
+            <div className="flex items-center gap-1">
+              <span className="rounded border border-accent bg-[#2a2113] px-2 py-1 text-[11px] font-mono text-accent">
+                {aoiPickerVertexCount} 顶点
+              </span>
+              {aoiPickerCanCommit && (
+                <button
+                  type="button"
+                  onClick={handleCommitAoiPick}
+                  className="rounded border border-mint/40 bg-[#0e2920] px-2 py-1 text-[11px] font-semibold text-mint hover:bg-[#103324]"
+                >
+                  ✓ 完成
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleCancelAoiPick}
+                className="rounded border border-border bg-bg-input px-2 py-1 text-[11px] text-text-secondary hover:border-accent-danger hover:text-accent-danger"
+              >
+                取消
+              </button>
+            </div>
+          ) : aoiCommitted ? (
+            <div className="flex items-center gap-1">
+              <span className="rounded border border-accent bg-[#2a2113] px-2 py-1 text-[11px] font-mono text-accent">
+                {ov.aoi!.vertices.length} 顶点
+              </span>
+              <button
+                type="button"
+                onClick={handleStartAoiPick}
+                className="rounded border border-border bg-bg-input px-2 py-1 text-[11px] text-text-secondary hover:border-accent hover:text-accent"
+              >
+                重画
+              </button>
+              <button
+                type="button"
+                onClick={handleClearAoi}
+                className="rounded border border-border bg-bg-input px-2 py-1 text-[11px] text-text-secondary hover:border-accent-danger hover:text-accent-danger"
+              >
+                清空
+              </button>
+            </div>
           ) : (
             <button
               type="button"
-              disabled
-              title="M31 待实施 · 启用 ov-aoi-pick 后可拾取"
-              onClick={() => setPickerMode(isPickingAoi ? 'idle' : 'ov-aoi-pick')}
-              className={cn(
-                'flex items-center gap-1 rounded border border-dashed px-2 py-1 text-[11px] font-semibold opacity-60',
-                isPickingAoi
-                  ? 'border-accent bg-[#2a2113] text-accent'
-                  : 'border-border bg-bg-input text-text-secondary',
-              )}
+              onClick={handleStartAoiPick}
+              className="flex items-center gap-1 rounded border border-dashed border-accent/60 bg-bg-input px-2 py-1 text-[11px] font-semibold text-accent hover:bg-[#2a2113]"
             >
-              + AOI 多边形 (M31)
+              + 拾取 AOI 多边形
             </button>
           )}
         </Row>
@@ -188,7 +258,68 @@ export function OvConfigPanel() {
 
       {/* M31b · 3 采样 */}
       <Card icon={<Layers3 className="h-3 w-3 text-accent" />} title="3 采样" badge={stage3Badge}>
-        <Placeholder text="M31b · 待实施" detail="ray-cast 表面采样 · 法向估计" />
+        {/* 进度（运行中显示） */}
+        {samplingStatus === 'running' && samplingProgress && (
+          <div className="flex flex-col gap-1.5 rounded border border-accent/40 bg-[#2c1308] p-2">
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="font-semibold text-[#ffaa4a]">⚡ 采样中</span>
+              <span className="font-mono text-[#ffaa4a]">
+                {samplingProgress.done} / {samplingProgress.total} · {samplingProgress.samples} hits
+              </span>
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-bg">
+              <div
+                className="h-full bg-[#ffaa4a] transition-all"
+                style={{
+                  width: `${Math.min(100, (samplingProgress.done / Math.max(1, samplingProgress.total)) * 100)}%`,
+                }}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={cancelSampling}
+              className="mt-1 rounded border border-accent-danger/40 bg-bg-input px-2 py-1 text-[10px] font-semibold text-accent-danger hover:bg-[#1a0d0d]"
+            >
+              取消
+            </button>
+          </div>
+        )}
+        {/* 已采样数 */}
+        {ov.samples && ov.samples.length > 0 && samplingStatus !== 'running' && (
+          <div className="flex items-center justify-between rounded border border-mint/30 bg-[#0e2920] px-2 py-1.5">
+            <span className="text-[11px] text-mint">
+              ✓ {ov.samples.length} 个采样点
+            </span>
+            {samplingProgress && (
+              <span className="font-mono text-[10px] text-text-secondary">
+                {(samplingProgress.elapsedMs / 1000).toFixed(1)}s
+              </span>
+            )}
+          </div>
+        )}
+        {/* 触发按钮 */}
+        <button
+          type="button"
+          onClick={handleStartSampling}
+          disabled={!aoiCommitted || samplingStatus === 'running'}
+          className={cn(
+            'flex items-center justify-center gap-1.5 rounded border px-2 py-1.5 text-[11px] font-semibold',
+            aoiCommitted && samplingStatus !== 'running'
+              ? 'border-accent bg-[#2a2113] text-accent hover:bg-[#3a2f0d]'
+              : 'border-border bg-bg-input text-text-muted opacity-60',
+          )}
+        >
+          {samplingStatus === 'running'
+            ? '运行中...'
+            : ov.samples && ov.samples.length > 0
+              ? '▶ 重新采样'
+              : aoiCommitted
+                ? '▶ 开始采样 (M31)'
+                : '需先拾取 AOI'}
+        </button>
+        <div className="text-[10px] text-text-muted">
+          ray-cast 表面采样 · 法向估计 M32 重算
+        </div>
       </Card>
 
       {/* M32 · 4 视角生成 */}

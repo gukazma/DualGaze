@@ -13,6 +13,9 @@ import { FacadeScanRecomputeHost } from './features/facade/FacadeScanRecomputeHo
 import { OrbitLayer } from './features/orbit/OrbitLayer';
 import { OrbitPicker } from './features/orbit/OrbitPicker';
 import { OrbitScanRecomputeHost } from './features/orbit/OrbitScanRecomputeHost';
+import { OvLayer } from './features/ov/OvLayer';
+import { OvAoiPickerMount } from './features/ov/OvAoiPickerMount';
+import { OvSamplingHost } from './features/ov/OvSamplingHost';
 import { useFacadePickerStore } from './store/facade-picker';
 import { useOrbitPickerStore } from './store/orbit-picker';
 import { useUiStore } from './store/ui';
@@ -107,6 +110,9 @@ export function App() {
           {isOrbit && <OrbitLayer />}
           {isOrbit && <OrbitPickerMount />}
           {isOrbit && <OrbitScanRecomputeHost />}
+          {isOv && <OvLayer />}
+          {isOv && <OvAoiPickerMount />}
+          {isOv && <OvSamplingHost />}
           {needsTileset && <TakeoffLayer />}
           {needsTileset && <TakeoffPickerMount />}
           {isMapping ? <MappingLayer /> : isFacade || isOrbit || isOv ? null : <WaypointLayer />}
