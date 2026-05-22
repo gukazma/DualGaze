@@ -8,9 +8,23 @@ export type MapView = '3d' | '2d';
  *  - 'idle': 默认（WaypointPicker / PolygonPicker 由各自的 layer 自行接管）
  *  - 'facade-draw': facade mission 内点 "新建立面" 进入 4 角拾取
  *  - 'orbit-draw': orbit mission 3 点拾取（底心 + 顶心 + 侧点）
- *  - 'takeoff-pick': v3.2 起飞点单点拾取（facade / orbit 强制流程）
+ *  - 'takeoff-pick': v3.2 起飞点单点拾取（facade / orbit / ov 强制流程）
+ *  - 'ov-aoi-pick': v3.3 ov AOI 多边形拾取
+ *  - 'ov-obstacle-pick': v3.3 ov 3 点矩形障碍物
+ *  - 'ov-nofly-pick': v3.3 ov 禁飞空域多边形
+ *  - 'ov-sweep-pick': v3.3 ov 2 点平扫航线
+ *  - 'ov-spot-orbit-pick': v3.3 ov 单点环拍
  */
-export type PickerMode = 'idle' | 'facade-draw' | 'orbit-draw' | 'takeoff-pick';
+export type PickerMode =
+  | 'idle'
+  | 'facade-draw'
+  | 'orbit-draw'
+  | 'takeoff-pick'
+  | 'ov-aoi-pick'
+  | 'ov-obstacle-pick'
+  | 'ov-nofly-pick'
+  | 'ov-sweep-pick'
+  | 'ov-spot-orbit-pick';
 
 interface UiState {
   createModalOpen: boolean;

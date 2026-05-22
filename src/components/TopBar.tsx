@@ -5,7 +5,7 @@ import { useCurrentMission, useMissionsStore } from '../store/missions';
 import { useUiStore } from '../store/ui';
 import { useSimulationStore } from '../store/simulation';
 import { prepareSimulation } from '../features/simulation/SimulationLoop';
-import { DRONE_CATALOG, PAYLOAD_CATALOG } from '../types/mission';
+import { DRONE_CATALOG, PAYLOAD_CATALOG, type MissionType } from '../types/mission';
 import { exportMissionToKmz } from '../lib/kmz-export';
 import { importKmzToMission } from '../lib/kmz-import';
 import { effectiveWaypoints } from '../features/simulation/SimulationLoop';
@@ -199,7 +199,7 @@ export function TopBar() {
   );
 }
 
-function MissionTypeChip({ type }: { type: 'patrol' | 'mapping' | 'strip' | 'facade' | 'orbit' }) {
+function MissionTypeChip({ type }: { type: MissionType }) {
   if (type === 'mapping') {
     return (
       <span className="rounded-sm bg-[#0a2b22] px-1.5 py-0.5 text-[9px] font-semibold text-accent-cyan">
@@ -218,6 +218,13 @@ function MissionTypeChip({ type }: { type: 'patrol' | 'mapping' | 'strip' | 'fac
     return (
       <span className="rounded-sm bg-[#2a2113] px-1.5 py-0.5 text-[9px] font-semibold text-[#ffd24a]">
         环绕航线
+      </span>
+    );
+  }
+  if (type === 'ov') {
+    return (
+      <span className="rounded-sm bg-[#2a2113] px-1.5 py-0.5 text-[9px] font-semibold text-[#ffd24a]">
+        优视航线
       </span>
     );
   }

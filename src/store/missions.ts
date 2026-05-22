@@ -15,6 +15,21 @@ import {
   type MissionType,
   type OrbitDef,
   type OrbitScanParams,
+  type OvAoi,
+  type OvCameraSpec,
+  type OvDef,
+  type OvNoFlyZone,
+  type OvObstacleBox,
+  type OvPathParams,
+  type OvSafetyHullParams,
+  type OvSamplePoint,
+  type OvSamplingParams,
+  type OvSortie,
+  type OvSplitParams,
+  type OvViewCandidate,
+  type OvViewGenParams,
+  type OvViewOptParams,
+  type OvVisibilityResult,
   type PolygonVertex,
   type TilesetSource,
   type Waypoint,
@@ -123,6 +138,38 @@ interface MissionsState {
   updateOrbitParams: (patch: Partial<OrbitScanParams>) => void;
   /** 直接写回 orbit.scanPath（由 OrbitScanRecomputeHost 算完调） */
   setOrbitScanResult: (scanPath: Waypoint[] | undefined) => void;
+
+  // ---------- ov (v3.3 优视航线) ----------
+  /** 设置 AOI 多边形（picker 完成时调；失效 samples + 全部下游） */
+  setOvAoi: (aoi: OvAoi | undefined) => void;
+  /** 加 1 个障碍物（必须在 safety hull 计算前；失效 samples + candidateViews） */
+  addOvObstacle: (init: Omit<OvObstacleBox, 'id'>) => string | null;
+  /** 删除障碍物 */
+  removeOvObstacle: (id: string) => void;
+  /** 加 1 个禁飞区（失效 samples + candidateViews） */
+  addOvNoFly: (init: Omit<OvNoFlyZone, 'id'>) => string | null;
+  /** 删除禁飞区 */
+  removeOvNoFly: (id: string) => void;
+  /** 更新相机参数（失效 samples + 全部下游） */
+  updateOvCameraParams: (patch: Partial<OvCameraSpec>) => void;
+  /** 更新安全罩参数（失效 samples + candidateViews） */
+  updateOvSafetyHull: (patch: Partial<OvSafetyHullParams>) => void;
+  /** 更新采样参数（失效 samples + 全部下游） */
+  updateOvSamplingParams: (patch: Partial<OvSamplingParams>) => void;
+  /** 更新视角生成参数（失效 candidateViews + 下游） */
+  updateOvViewGenParams: (patch: Partial<OvViewGenParams>) => void;
+  /** 更新视角优化参数（失效 selectedViews + paths） */
+  updateOvViewOptParams: (patch: Partial<OvViewOptParams>) => void;
+  /** 更新路径参数（失效 paths） */
+  updateOvPathParams: (patch: Partial<OvPathParams>) => void;
+  /** 更新分架次参数（失效 paths 中的 sortie 划分） */
+  updateOvSplitParams: (patch: Partial<OvSplitParams>) => void;
+  /** Host 算完后写回 samples / views / paths / visibility */
+  setOvSamples: (samples: OvSamplePoint[] | undefined) => void;
+  setOvCandidateViews: (views: OvViewCandidate[] | undefined) => void;
+  setOvSelectedViews: (views: OvViewCandidate[] | undefined) => void;
+  setOvPaths: (paths: OvSortie[] | undefined) => void;
+  setOvVisibility: (result: OvVisibilityResult | undefined) => void;
 }
 
 const reindex = (waypoints: Waypoint[]): Waypoint[] =>
@@ -146,6 +193,44 @@ const withRecomputedScan = (m: Mission): Mission => {
 
 let _faceIdSeq = 0;
 const newFaceId = (): string => `face_${Date.now().toString(36)}_${(++_faceIdSeq).toString(36)}`;
+
+let _ovIdSeq = 0;
+const newOvId = (prefix: 'obs' | 'nfz' | 'smp' | 'view' | 'sortie'): string =>
+  `${prefix}_${Date.now().toString(36)}_${(++_ovIdSeq).toString(36)}`;
+
+/**
+ * OV 失效级联：根据改动级别清空相应中间结果。
+ *
+ * - 'samples'：清 samples + candidateViews + selectedViews + paths + visibility
+ * - 'views'：清 candidateViews + selectedViews + paths + visibility（保留 samples）
+ * - 'opt'：清 selectedViews + paths + visibility（保留 samples + candidateViews）
+ * - 'paths'：只清 paths（保留 visibility）
+ */
+const invalidateOvDownstream = (
+  ov: OvDef,
+  level: 'samples' | 'views' | 'opt' | 'paths',
+): OvDef => {
+  const next = { ...ov };
+  if (level === 'samples') {
+    next.samples = undefined;
+    next.candidateViews = undefined;
+    next.selectedViews = undefined;
+    next.paths = undefined;
+    next.visibility = undefined;
+  } else if (level === 'views') {
+    next.candidateViews = undefined;
+    next.selectedViews = undefined;
+    next.paths = undefined;
+    next.visibility = undefined;
+  } else if (level === 'opt') {
+    next.selectedViews = undefined;
+    next.paths = undefined;
+    next.visibility = undefined;
+  } else if (level === 'paths') {
+    next.paths = undefined;
+  }
+  return next;
+};
 
 /**
  * facade mission：face 的 plane + scanPath 由 React 层（FacadePicker）算后通过
@@ -470,10 +555,10 @@ export const useMissionsStore = create<MissionsState>()(
           return true;
         },
 
-        // ---------- takeoff (v3.2) ----------
+        // ---------- takeoff (v3.2 / v3.3) ----------
         setTakeOffPoint: (pt) =>
           updCurrent((m) => {
-            if (m.type !== 'facade' && m.type !== 'orbit') return m;
+            if (m.type !== 'facade' && m.type !== 'orbit' && m.type !== 'ov') return m;
             return { ...m, takeOffPoint: pt };
           }),
 
@@ -511,6 +596,206 @@ export const useMissionsStore = create<MissionsState>()(
           updCurrent((m) => {
             if (m.type !== 'orbit' || !m.orbit) return m;
             return { ...m, orbit: { ...m.orbit, scanPath } };
+          }),
+
+        // ---------- ov (v3.3 优视航线) ----------
+        setOvAoi: (aoi) =>
+          updCurrent((m) => {
+            if (m.type !== 'ov' || !m.ov) return m;
+            return {
+              ...m,
+              ov: invalidateOvDownstream({ ...m.ov, aoi }, 'samples'),
+            };
+          }),
+
+        addOvObstacle: (init) => {
+          const id = newOvId('obs');
+          updCurrent((m) => {
+            if (m.type !== 'ov' || !m.ov) return m;
+            const obstacle: OvObstacleBox = { id, ...init };
+            return {
+              ...m,
+              ov: invalidateOvDownstream(
+                { ...m.ov, insertObstacles: [...m.ov.insertObstacles, obstacle] },
+                'views',
+              ),
+            };
+          });
+          return id;
+        },
+
+        removeOvObstacle: (id) =>
+          updCurrent((m) => {
+            if (m.type !== 'ov' || !m.ov) return m;
+            return {
+              ...m,
+              ov: invalidateOvDownstream(
+                {
+                  ...m.ov,
+                  insertObstacles: m.ov.insertObstacles.filter((o) => o.id !== id),
+                },
+                'views',
+              ),
+            };
+          }),
+
+        addOvNoFly: (init) => {
+          const id = newOvId('nfz');
+          updCurrent((m) => {
+            if (m.type !== 'ov' || !m.ov) return m;
+            const zone: OvNoFlyZone = { id, ...init };
+            return {
+              ...m,
+              ov: invalidateOvDownstream(
+                { ...m.ov, noFlyZones: [...m.ov.noFlyZones, zone] },
+                'views',
+              ),
+            };
+          });
+          return id;
+        },
+
+        removeOvNoFly: (id) =>
+          updCurrent((m) => {
+            if (m.type !== 'ov' || !m.ov) return m;
+            return {
+              ...m,
+              ov: invalidateOvDownstream(
+                {
+                  ...m.ov,
+                  noFlyZones: m.ov.noFlyZones.filter((z) => z.id !== id),
+                },
+                'views',
+              ),
+            };
+          }),
+
+        updateOvCameraParams: (patch) =>
+          updCurrent((m) => {
+            if (m.type !== 'ov' || !m.ov) return m;
+            return {
+              ...m,
+              ov: invalidateOvDownstream(
+                { ...m.ov, cameraParams: { ...m.ov.cameraParams, ...patch } },
+                'samples',
+              ),
+            };
+          }),
+
+        updateOvSafetyHull: (patch) =>
+          updCurrent((m) => {
+            if (m.type !== 'ov' || !m.ov) return m;
+            return {
+              ...m,
+              ov: invalidateOvDownstream(
+                { ...m.ov, safetyHull: { ...m.ov.safetyHull, ...patch } },
+                'views',
+              ),
+            };
+          }),
+
+        updateOvSamplingParams: (patch) =>
+          updCurrent((m) => {
+            if (m.type !== 'ov' || !m.ov) return m;
+            return {
+              ...m,
+              ov: invalidateOvDownstream(
+                { ...m.ov, samplingParams: { ...m.ov.samplingParams, ...patch } },
+                'samples',
+              ),
+            };
+          }),
+
+        updateOvViewGenParams: (patch) =>
+          updCurrent((m) => {
+            if (m.type !== 'ov' || !m.ov) return m;
+            // strategies / sideVariants / topVariants 子对象需手动 merge
+            const merged: OvViewGenParams = {
+              ...m.ov.viewGenParams,
+              ...patch,
+              sideVariants: {
+                ...m.ov.viewGenParams.sideVariants,
+                ...(patch.sideVariants ?? {}),
+              },
+              topVariants: {
+                ...m.ov.viewGenParams.topVariants,
+                ...(patch.topVariants ?? {}),
+              },
+              strategies: {
+                ...m.ov.viewGenParams.strategies,
+                ...(patch.strategies ?? {}),
+              },
+            };
+            return {
+              ...m,
+              ov: invalidateOvDownstream({ ...m.ov, viewGenParams: merged }, 'views'),
+            };
+          }),
+
+        updateOvViewOptParams: (patch) =>
+          updCurrent((m) => {
+            if (m.type !== 'ov' || !m.ov) return m;
+            return {
+              ...m,
+              ov: invalidateOvDownstream(
+                { ...m.ov, viewOptParams: { ...m.ov.viewOptParams, ...patch } },
+                'opt',
+              ),
+            };
+          }),
+
+        updateOvPathParams: (patch) =>
+          updCurrent((m) => {
+            if (m.type !== 'ov' || !m.ov) return m;
+            return {
+              ...m,
+              ov: invalidateOvDownstream(
+                { ...m.ov, pathParams: { ...m.ov.pathParams, ...patch } },
+                'paths',
+              ),
+            };
+          }),
+
+        updateOvSplitParams: (patch) =>
+          updCurrent((m) => {
+            if (m.type !== 'ov' || !m.ov) return m;
+            return {
+              ...m,
+              ov: invalidateOvDownstream(
+                { ...m.ov, splitParams: { ...m.ov.splitParams, ...patch } },
+                'paths',
+              ),
+            };
+          }),
+
+        setOvSamples: (samples) =>
+          updCurrent((m) => {
+            if (m.type !== 'ov' || !m.ov) return m;
+            return { ...m, ov: { ...m.ov, samples } };
+          }),
+
+        setOvCandidateViews: (candidateViews) =>
+          updCurrent((m) => {
+            if (m.type !== 'ov' || !m.ov) return m;
+            return { ...m, ov: { ...m.ov, candidateViews } };
+          }),
+
+        setOvSelectedViews: (selectedViews) =>
+          updCurrent((m) => {
+            if (m.type !== 'ov' || !m.ov) return m;
+            return { ...m, ov: { ...m.ov, selectedViews } };
+          }),
+
+        setOvPaths: (paths) =>
+          updCurrent((m) => {
+            if (m.type !== 'ov' || !m.ov) return m;
+            return { ...m, ov: { ...m.ov, paths } };
+          }),
+
+        setOvVisibility: (visibility) =>
+          updCurrent((m) => {
+            if (m.type !== 'ov' || !m.ov) return m;
+            return { ...m, ov: { ...m.ov, visibility } };
           }),
       };
     },

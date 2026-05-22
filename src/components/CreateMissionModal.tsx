@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ArrowRight, Info, Route, Grid3x3, Spline, ScanEye, type LucideIcon } from 'lucide-react';
+import { ArrowRight, Info, Route, Grid3x3, Spline, ScanEye, Target, ScanSearch, type LucideIcon } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -33,6 +33,8 @@ const ICON_MAP: Record<string, LucideIcon> = {
   'grid-3x3': Grid3x3,
   spline: Spline,
   'scan-eye': ScanEye,
+  target: Target,
+  'scan-search': ScanSearch,
 };
 
 export function CreateMissionModal() {

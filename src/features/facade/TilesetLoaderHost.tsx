@@ -32,9 +32,9 @@ export function TilesetLoaderHost() {
   const setError = useTilesetLoadingStore((s) => s.setError);
   const reset = useTilesetLoadingStore((s) => s.reset);
 
-  // facade + orbit 都需要 tileset
+  // facade + orbit + ov 都需要 tileset
   const source: TilesetSource | undefined =
-    mission?.type === 'facade' || mission?.type === 'orbit'
+    mission?.type === 'facade' || mission?.type === 'orbit' || mission?.type === 'ov'
       ? mission.tilesetSource
       : undefined;
 

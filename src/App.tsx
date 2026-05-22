@@ -54,7 +54,8 @@ export function App() {
   const isMapping = mission?.type === 'mapping';
   const isFacade = mission?.type === 'facade';
   const isOrbit = mission?.type === 'orbit';
-  const needsTileset = isFacade || isOrbit;
+  const isOv = mission?.type === 'ov';
+  const needsTileset = isFacade || isOrbit || isOv;
   const pickerMode = useUiStore((s) => s.pickerMode);
   const tilesetStatus = useTilesetLoadingStore((s) => s.status);
   const facadeFaceCount = mission?.type === 'facade' ? mission.facadeFaces?.length ?? 0 : 0;
@@ -108,7 +109,7 @@ export function App() {
           {isOrbit && <OrbitScanRecomputeHost />}
           {needsTileset && <TakeoffLayer />}
           {needsTileset && <TakeoffPickerMount />}
-          {isMapping ? <MappingLayer /> : isFacade || isOrbit ? null : <WaypointLayer />}
+          {isMapping ? <MappingLayer /> : isFacade || isOrbit || isOv ? null : <WaypointLayer />}
           <DroneLayer />
           <FrustumLayer />
           {isFacade && !isSimulating && <FacadePickerHud />}

@@ -24,6 +24,7 @@ export function RightSheet() {
   const isMapping = mission?.type === 'mapping';
   const isFacade = mission?.type === 'facade';
   const isOrbit = mission?.type === 'orbit';
+  const isOv = mission?.type === 'ov';
 
   // 不同 mission type 下不合法的 tab 自动回退
   useEffect(() => {
@@ -35,18 +36,25 @@ export function RightSheet() {
       if (tab !== 'orbit' && tab !== 'config' && tab !== 'scan') setTab('orbit' as RightSheetTab);
       return;
     }
+    if (isOv) {
+      // ov 复用 config tab（OvConfigPanel 在 MissionConfigPanel 内分发渲染）
+      if (tab !== 'config') setTab('config');
+      return;
+    }
     if (isMapping) {
       if (tab === 'actions' || tab === 'faces' || tab === 'orbit') setTab('waypoints');
       return;
     }
     // patrol
     if (tab === 'scan' || tab === 'faces' || tab === 'orbit') setTab('waypoints');
-  }, [isMapping, isFacade, isOrbit, tab, setTab]);
+  }, [isMapping, isFacade, isOrbit, isOv, tab, setTab]);
 
   const facadeFaceCount = mission?.facadeFaces?.length ?? 0;
   const facadeWaypointCount =
     mission?.facadeFaces?.reduce((sum, f) => sum + (f.enabled ? (f.scanPath?.length ?? 0) : 0), 0) ?? 0;
   const orbitWpCount = mission?.orbit?.scanPath?.length ?? 0;
+  const ovSampleCount = mission?.type === 'ov' ? mission.ov?.samples?.length ?? 0 : 0;
+  const ovSortieCount = mission?.type === 'ov' ? mission.ov?.paths?.length ?? 0 : 0;
   const headerCount = isMapping
     ? `${mission?.polygon?.length ?? 0} 顶点 · ${mission?.scanPath?.length ?? 0} 扫描点`
     : isFacade
@@ -55,7 +63,9 @@ export function RightSheet() {
         ? mission?.orbit
           ? `R=${mission.orbit.radius.toFixed(1)}m · ${orbitWpCount} 航点`
           : '未拾取'
-        : `${mission?.waypoints.length ?? 0} 航点`;
+        : isOv
+          ? `${ovSampleCount} samples · ${ovSortieCount} 架次`
+          : `${mission?.waypoints.length ?? 0} 航点`;
 
   return (
     <div className="flex h-full w-full flex-col">
@@ -72,7 +82,7 @@ export function RightSheet() {
         </div>
       </div>
 
-      {(isFacade || isOrbit) && <TakeoffStatusRow />}
+      {(isFacade || isOrbit || isOv) && <TakeoffStatusRow />}
 
       {mission ? (
         <Tabs

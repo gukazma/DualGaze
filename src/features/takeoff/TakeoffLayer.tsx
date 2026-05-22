@@ -21,7 +21,7 @@ export function TakeoffLayer() {
   const dsRef = useRef<Cesium.CustomDataSource | null>(null);
 
   const isApplicable =
-    mission?.type === 'facade' || mission?.type === 'orbit';
+    mission?.type === 'facade' || mission?.type === 'orbit' || mission?.type === 'ov';
   const takeOff = isApplicable ? mission?.takeOffPoint : undefined;
 
   // dataSource lifecycle

@@ -17,7 +17,8 @@ export function TakeoffStatusRow() {
   const setPickerMode = useUiStore((s) => s.setPickerMode);
   const setTakeOff = useMissionsStore((s) => s.setTakeOffPoint);
 
-  const isApplicable = mission?.type === 'facade' || mission?.type === 'orbit';
+  const isApplicable =
+    mission?.type === 'facade' || mission?.type === 'orbit' || mission?.type === 'ov';
   if (!isApplicable) return null;
 
   const t = mission.takeOffPoint;

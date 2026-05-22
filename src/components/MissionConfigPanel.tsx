@@ -19,6 +19,7 @@ import {
 import { useCurrentMission, useMissionsStore } from '../store/missions';
 import { TilesetSourcePicker } from './TilesetSourcePicker';
 import { FacadeConfigPanel } from './FacadeConfigPanel';
+import { OvConfigPanel } from './OvConfigPanel';
 import {
   MAPPING_DEFAULTS,
   MISSION_DEFAULTS,
@@ -56,7 +57,8 @@ export function MissionConfigPanel() {
   const isMapping = mission.type === 'mapping';
   const isFacade = mission.type === 'facade';
   const isOrbit = mission.type === 'orbit';
-  const needsTileset = isFacade || isOrbit;
+  const isOv = mission.type === 'ov';
+  const needsTileset = isFacade || isOrbit || isOv;
   const scanParams = mission.scanParams ?? MAPPING_DEFAULTS;
 
   const set = <K extends keyof Mission>(key: K, value: Mission[K]): void => {
@@ -105,6 +107,7 @@ export function MissionConfigPanel() {
 
           {needsTileset && <TilesetSourcePicker />}
           {isFacade && <FacadeConfigPanel />}
+          {isOv && <OvConfigPanel />}
 
           {isMapping && (
             <Card

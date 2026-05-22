@@ -5,10 +5,10 @@
  * 这样 KMZ 导出 / DJI Pilot 2 / FlightHub 2 看到的坐标都是 GPS 标准。
  */
 
-export type MissionType = 'patrol' | 'mapping' | 'strip' | 'facade' | 'orbit';
+export type MissionType = 'patrol' | 'mapping' | 'strip' | 'facade' | 'orbit' | 'ov';
 
-/** v3.1 启用 'patrol' + 'mapping' + 'facade' + 'orbit'；strip 仍 disabled */
-export const ENABLED_MISSION_TYPES: ReadonlySet<MissionType> = new Set(['patrol', 'mapping', 'facade', 'orbit']);
+/** v3.3 启用 'patrol' + 'mapping' + 'facade' + 'orbit' + 'ov'（优视航线）；strip 仍 disabled */
+export const ENABLED_MISSION_TYPES: ReadonlySet<MissionType> = new Set(['patrol', 'mapping', 'facade', 'orbit', 'ov']);
 
 export interface MissionTypeMeta {
   id: MissionType;
@@ -52,6 +52,13 @@ export const MISSION_TYPE_CATALOG: ReadonlyArray<MissionTypeMeta> = [
     label: '环绕摄影航线',
     description: '塔状目标多圈环绕 · 相机始终朝主轴',
     iconName: 'target',
+    disabled: false,
+  },
+  {
+    id: 'ov',
+    label: '优视航线',
+    description: '蝶舞 DroneScan pipeline · 采样 → 视角生成 → 优化 → 路径',
+    iconName: 'scan-search',
     disabled: false,
   },
 ];
@@ -307,6 +314,227 @@ export interface OrbitDef {
   scanPath?: Waypoint[];
 }
 
+// ---------- v3.3 Optimized Views (优视航线) Mission ----------
+
+/**
+ * OV 测区 AOI 多边形（WGS84 顶点 ≥3）+ 整体高度区间。
+ * 高度区间用于剔除超出范围的采样点（顶层 / 地面下）。
+ */
+export interface OvAoi {
+  vertices: { lon: number; lat: number; alt?: number }[];
+  /** 采样最低高度 m（相对椭球面，沿用 mission.heightMode 语义） */
+  minHeight: number;
+  /** 采样最高高度 m */
+  maxHeight: number;
+}
+
+/** OV 禁飞空域：多边形 + 高度区间 */
+export interface OvNoFlyZone {
+  id: string;
+  vertices: { lon: number; lat: number }[];
+  minHeight: number;
+  maxHeight: number;
+}
+
+/** OV 插入障碍物：3 点定矩形 + 高度（在 tileset 未体现的人造障碍） */
+export interface OvObstacleBox {
+  id: string;
+  corners: { lon: number; lat: number; alt: number }[]; // 3 点定矩形
+  height: number;
+}
+
+/** OV 相机参数（35mm 等效 / 画幅 / 渲染分辨率 / 多线程） */
+export interface OvCameraSpec {
+  focalLength35mm: number; // mm
+  sensorWidthMm: number; // 水平画幅 mm
+  sensorHeightMm: number; // 竖直画幅 mm
+  renderResolution: number; // ray-cast 内部分辨率 px
+  threadCount: number; // 并发
+  optimizeOverlap: number; // 视角优化重叠率 %
+}
+
+/** OV 安全罩参数（per-sample ray-cast 偏移阈值） */
+export interface OvSafetyHullParams {
+  safetyDistance: number; // m
+  safetyHeight: number; // m
+  resolution: number; // px
+}
+
+/** OV 采样参数 */
+export interface OvSamplingParams {
+  /** 重叠率 0-1，决定 ray-cast 网格步长 */
+  overlapRatio: number;
+  /** 视角距离 m */
+  viewDistance: number;
+  /** 最大高度 m */
+  maxHeight: number;
+  /** 最小高度 m（可负值，地下） */
+  minHeight: number;
+  /** AOI 外扩 m */
+  expandDistance: number;
+  /** 部分采样：sides 仅侧面 / full 全部 */
+  surfaceMode: 'sides' | 'full';
+  /** 可视范围采样（只对当前相机可见的区域采样） */
+  visibleRangeOnly: boolean;
+}
+
+/** OV 视角生成参数 */
+export interface OvViewGenParams {
+  /** gimbal pitch 范围 [min, max] ° */
+  pitchRange: [number, number];
+  /** 4 侧视变体开关 */
+  sideVariants: {
+    original: boolean;
+    horizontal: boolean;
+    leftShift: boolean;
+    rightShift: boolean;
+  };
+  /** 5 顶视变体开关 */
+  topVariants: {
+    original: boolean;
+    north: boolean;
+    east: boolean;
+    south: boolean;
+    west: boolean;
+  };
+  /** 7 调整策略：第一列 step，第二列 limit */
+  strategies: {
+    layer: { enabled: boolean; step: number; limit: number }; // 视角分层 m
+    horizontalRing: { enabled: boolean; step: number; limit: number }; // 水平环形 °
+    pullNear: { enabled: boolean; step: number; limit: number }; // 拉近 m
+    liftHeight: { enabled: boolean; step: number; limit: number }; // 抬高 m
+    pushFar: { enabled: boolean; step: number; limit: number }; // 拉远 m
+    verticalRing: { enabled: boolean; step: number; limit: number }; // 垂直环形 °
+    sphere: {
+      enabled: boolean;
+      step: number;
+      sliceStep: number;
+      limit: number;
+    }; // 球形 ° / m / °
+  };
+}
+
+/** OV 视角优化参数 */
+export interface OvViewOptParams {
+  method: 'angle' | 'hemisphere';
+  /** 角度法 α ° */
+  alpha: number;
+  /** 角度法 θ ° */
+  theta: number;
+  /** 角度法 视角个数 K */
+  viewCount: number;
+  /** 半球法 半衰程度 % */
+  halfDecay: number;
+  /** 半球法 半衰面数 */
+  halfDecayFaces: number;
+  /** 半球法 半衰次数 */
+  halfDecayPasses: number;
+  /** 半球法 半衰量 */
+  halfDecayAmount: number;
+  /** 重新计算采样点（优化后用 selectedViews 反算 visibility） */
+  recomputeSamples: boolean;
+  /** 终止数 (0=自动) */
+  terminationCount: number;
+  /** 显示可见性热图 */
+  showVisibilityHeatmap: boolean;
+}
+
+/** OV 路径生成参数（TSP 4-cost + 5 种区域分割） */
+export interface OvPathParams {
+  splitMode: 'cluster' | 'altPriority' | 'viewPriority' | 'fixedAlt' | 'viewSplit';
+  /** 区域数 */
+  regionCount: number;
+  /** 水平距离 cost */
+  costH: number;
+  /** 垂直距离 cost */
+  costV: number;
+  /** 水平旋角 cost */
+  costHRot: number;
+  /** 垂直旋角 cost */
+  costVRot: number;
+}
+
+/** OV 分架次参数 */
+export interface OvSplitParams {
+  strategy: 'count' | 'length' | 'parity';
+  perSortieCount: number;
+  perSortieLengthM: number;
+  /** 进出航线增高 m（避障） */
+  transitHeight: number;
+  /** 删除相近点阈值 m */
+  removeNearM: number;
+}
+
+/** OV 采样点（ray-cast 命中 + 法向估计） */
+export interface OvSamplePoint {
+  id: string;
+  lon: number;
+  lat: number;
+  alt: number;
+  /** ENU 单位法向量 */
+  normal: [number, number, number];
+  /** 被覆盖的视角数（M33 优化后填，用于热图染色） */
+  coverCount?: number;
+}
+
+/** OV 视角候选 / 已选 */
+export interface OvViewCandidate {
+  id: string;
+  /** 相机位置 WGS84 */
+  camLon: number;
+  camLat: number;
+  camAlt: number;
+  /** 看向的采样点 */
+  targetSampleId: string;
+  heading: number; // °
+  pitch: number; // °
+  /** 视角变体类型（调试用：side-original / side-horizontal / top-north / ...） */
+  variant: string;
+}
+
+/** OV 单架次 */
+export interface OvSortie {
+  id: string;
+  /** 地图染色 */
+  color: string;
+  waypoints: Waypoint[];
+}
+
+/** OV 可见性评估结果 */
+export interface OvVisibilityResult {
+  /** sampleId -> 覆盖它的 viewIds 列表 */
+  sampleToViews: Record<string, string[]>;
+  /** 全场景平均覆盖数 */
+  avgCoverage: number;
+}
+
+/**
+ * OV mission 总体 schema —— 参数 + 重产物分离。
+ * 参数走持久化（KMZ schema），重产物（samples/views/paths/visibility）M30 阶段一并 persist，
+ * 后续 M36 落 KMZ 时只写参数让 import 端按需重算。
+ */
+export interface OvDef {
+  /** 测区 AOI 多边形；undefined = picker 未拾取 */
+  aoi?: OvAoi;
+  /** 禁飞空域列表 */
+  noFlyZones: OvNoFlyZone[];
+  /** 插入障碍列表（必须在 safety hull 计算前插） */
+  insertObstacles: OvObstacleBox[];
+  cameraParams: OvCameraSpec;
+  safetyHull: OvSafetyHullParams;
+  samplingParams: OvSamplingParams;
+  viewGenParams: OvViewGenParams;
+  viewOptParams: OvViewOptParams;
+  pathParams: OvPathParams;
+  splitParams: OvSplitParams;
+  // 重产物（中间结果，可由参数 + tileset 重算）
+  samples?: OvSamplePoint[];
+  candidateViews?: OvViewCandidate[];
+  selectedViews?: OvViewCandidate[];
+  paths?: OvSortie[];
+  visibility?: OvVisibilityResult;
+}
+
 /** facade 3DTiles 数据源 */
 export interface TilesetSource {
   /** http = Cesium3DTileset.fromUrl；localDir = M17 webkitdirectory + Resource 拦截 */
@@ -352,6 +580,8 @@ export interface Mission {
   tilesetSource?: TilesetSource;
   /** v3.1 orbit 类型：1 mission = 1 orbit；同 tilesetSource 共用（orbit 也要 tileset 才能拾点 + raycast） */
   orbit?: OrbitDef;
+  /** v3.3 ov 类型：优视航线 pipeline 全状态（参数 + 中间结果） */
+  ov?: OvDef;
   /**
    * v3.2 起飞点（facade / orbit 强制设；patrol / mapping 不动）。
    * 用户在 3DTiles 表面 3D pick 1 点。设置后 KMZ 导出改用 relativeToStartPoint。
@@ -445,6 +675,98 @@ export const FACADE_PRESETS: ReadonlyArray<FacadePreset> = [
   { id: 'quick', label: '快速浏览', description: 'GSD 10mm · 65/65% · 适合先看一遍', gsdMm: 10, overlapFront: 0.65, overlapSide: 0.65 },
 ];
 
+// ---------- v3.3 OV defaults ----------
+
+export const OV_CAMERA_DEFAULTS: OvCameraSpec = {
+  focalLength35mm: 24,
+  sensorWidthMm: 36.0,
+  sensorHeightMm: 24.0,
+  renderResolution: 300,
+  threadCount: 4,
+  optimizeOverlap: 90,
+};
+
+export const OV_SAFETY_DEFAULTS: OvSafetyHullParams = {
+  safetyDistance: 20,
+  safetyHeight: 20,
+  resolution: 30,
+};
+
+export const OV_SAMPLING_DEFAULTS: OvSamplingParams = {
+  overlapRatio: 0.85,
+  viewDistance: 50,
+  maxHeight: 500,
+  minHeight: -10,
+  expandDistance: 0,
+  surfaceMode: 'sides',
+  visibleRangeOnly: false,
+};
+
+export const OV_VIEWGEN_DEFAULTS: OvViewGenParams = {
+  pitchRange: [-90, 0],
+  sideVariants: { original: true, horizontal: true, leftShift: true, rightShift: true },
+  topVariants: { original: true, north: true, east: true, south: true, west: true },
+  strategies: {
+    layer: { enabled: true, step: 1, limit: 1 },
+    horizontalRing: { enabled: true, step: 5, limit: 70 },
+    pullNear: { enabled: true, step: 5, limit: 70 },
+    liftHeight: { enabled: true, step: 5, limit: 50 },
+    pushFar: { enabled: true, step: 5, limit: 50 },
+    verticalRing: { enabled: true, step: 5, limit: 70 },
+    sphere: { enabled: true, step: 5, sliceStep: 1, limit: 70 },
+  },
+};
+
+export const OV_VIEWOPT_DEFAULTS: OvViewOptParams = {
+  method: 'angle',
+  alpha: 55,
+  theta: 55,
+  viewCount: 15,
+  halfDecay: 50,
+  halfDecayFaces: 6,
+  halfDecayPasses: 5,
+  halfDecayAmount: 30,
+  recomputeSamples: false,
+  terminationCount: 0,
+  showVisibilityHeatmap: true,
+};
+
+export const OV_PATH_DEFAULTS: OvPathParams = {
+  splitMode: 'cluster',
+  regionCount: 4,
+  costH: 3,
+  costV: 6,
+  costHRot: 1,
+  costVRot: 1,
+};
+
+export const OV_SPLIT_DEFAULTS: OvSplitParams = {
+  strategy: 'count',
+  perSortieCount: 150,
+  perSortieLengthM: 3600,
+  transitHeight: 100,
+  removeNearM: 1,
+};
+
+/** 完整 OvDef 默认值（mission 创建时初始化） */
+export const OV_DEF_DEFAULTS: OvDef = {
+  aoi: undefined,
+  noFlyZones: [],
+  insertObstacles: [],
+  cameraParams: { ...OV_CAMERA_DEFAULTS },
+  safetyHull: { ...OV_SAFETY_DEFAULTS },
+  samplingParams: { ...OV_SAMPLING_DEFAULTS },
+  viewGenParams: structuredClone(OV_VIEWGEN_DEFAULTS),
+  viewOptParams: { ...OV_VIEWOPT_DEFAULTS },
+  pathParams: { ...OV_PATH_DEFAULTS },
+  splitParams: { ...OV_SPLIT_DEFAULTS },
+  samples: undefined,
+  candidateViews: undefined,
+  selectedViews: undefined,
+  paths: undefined,
+  visibility: undefined,
+};
+
 // ---------- Factory ----------
 
 let _waypointSeq = 0;
@@ -481,6 +803,13 @@ export function createBlankMission(init: {
   if (init.type === 'orbit') {
     base.orbit = undefined; // 等 picker 拾完 3 点才建
     base.tilesetSource = undefined;
+  }
+  if (init.type === 'ov') {
+    base.tilesetSource = undefined;
+    base.ov = {
+      ...OV_DEF_DEFAULTS,
+      viewGenParams: structuredClone(OV_VIEWGEN_DEFAULTS),
+    };
   }
   return base;
 }
@@ -540,6 +869,32 @@ export function migrateMissionToLatest(m: Partial<Mission> & Pick<Mission, 'id' 
     } else {
       next.orbit = undefined;
     }
+  }
+  if (next.type === 'ov') {
+    next.tilesetSource = m.tilesetSource;
+    const src = m.ov;
+    next.ov = src
+      ? {
+          ...OV_DEF_DEFAULTS,
+          ...src,
+          // 子对象逐个合 defaults 兜底
+          cameraParams: { ...OV_CAMERA_DEFAULTS, ...(src.cameraParams ?? {}) },
+          safetyHull: { ...OV_SAFETY_DEFAULTS, ...(src.safetyHull ?? {}) },
+          samplingParams: { ...OV_SAMPLING_DEFAULTS, ...(src.samplingParams ?? {}) },
+          viewGenParams: {
+            ...structuredClone(OV_VIEWGEN_DEFAULTS),
+            ...(src.viewGenParams ?? {}),
+          },
+          viewOptParams: { ...OV_VIEWOPT_DEFAULTS, ...(src.viewOptParams ?? {}) },
+          pathParams: { ...OV_PATH_DEFAULTS, ...(src.pathParams ?? {}) },
+          splitParams: { ...OV_SPLIT_DEFAULTS, ...(src.splitParams ?? {}) },
+          noFlyZones: Array.isArray(src.noFlyZones) ? src.noFlyZones : [],
+          insertObstacles: Array.isArray(src.insertObstacles) ? src.insertObstacles : [],
+        }
+      : {
+          ...OV_DEF_DEFAULTS,
+          viewGenParams: structuredClone(OV_VIEWGEN_DEFAULTS),
+        };
   }
   return next;
 }
