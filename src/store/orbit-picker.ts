@@ -10,7 +10,7 @@ interface OrbitPickerStore {
 }
 
 export const useOrbitPickerStore = create<OrbitPickerStore>((set) => ({
-  state: { mode: 'drawing', points: [] },
+  state: { mode: 'building', partial: {}, scanPath: [] },
   setState: (s) => set({ state: s }),
   flipPreviewDirection: null,
   setFlipPreviewDirection: (fn) => set({ flipPreviewDirection: fn }),

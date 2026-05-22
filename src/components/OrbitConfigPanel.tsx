@@ -56,6 +56,22 @@ export function OrbitConfigPanel() {
           </div>
         </div>
 
+        {/* v3.3 圆柱总高 H —— 因为塔顶难拾，picker 不取顶心，H 由 sheet 滑块控制 */}
+        <RangeRow
+          label="圆柱总高 H"
+          value={`${params.totalH.toFixed(1)} m`}
+        >
+          <input
+            type="range"
+            min={5}
+            max={300}
+            step={1}
+            value={params.totalH}
+            onChange={(e) => updateOrbitParams({ totalH: parseFloat(e.target.value) })}
+            className="w-full accent-[#ffd24a]"
+          />
+        </RangeRow>
+
         {/* 安全距 */}
         <RangeRow
           label="安全距 standoff"

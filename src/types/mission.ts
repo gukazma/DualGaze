@@ -281,16 +281,27 @@ export interface OrbitScanParams {
   topAltOffset: number;
   /** 偶数圈是否反向 → 上下圈衔接走最短弧（"蛇形上升"） */
   flipRingDirection: boolean;
+  /**
+   * v3.3 圆柱总高 m。axisTop.alt = axisBottom.alt + totalH。
+   * 由 sheet 滑块控制，因为塔顶 raycast 常被构件干扰，让用户在 sheet 调更可靠。
+   * picker 完成时默认 30m。
+   */
+  totalH: number;
 }
 
 /** v3.1 orbit 几何 + 扫描结果 */
 export interface OrbitDef {
-  /** 主轴底端（一般在地面靠塔的点） */
+  /** 主轴底端（圆心 lon/lat + 最低拾点 alt） */
   axisBottom: { lon: number; lat: number; alt: number };
-  /** 主轴顶端（一般在塔尖 / 屋顶） */
+  /** 主轴顶端（lon/lat = axisBottom，alt = axisBottom.alt + params.totalH） */
   axisTop: { lon: number; lat: number; alt: number };
-  /** 测量得到的物体半径 m（picker 第 ③ 点到 axis 的水平距离） */
+  /** 外接圆半径 m（v3.3 起来自 fitPoints 最小外接圆拟合；v3.1 兼容字段） */
   radius: number;
+  /**
+   * v3.3 用户拾的 N 个墙面点（WGS84），用于重新拟合外接圆 + sheet 中显示 / 编辑。
+   * 旧 KMZ 没这个字段；导入时 fitPoints 为 undefined，但 axisBottom/Top/radius 仍可用。
+   */
+  fitPoints?: { lon: number; lat: number; alt: number }[];
   params: OrbitScanParams;
   /** 算出来的扫描航点 */
   scanPath?: Waypoint[];
@@ -399,6 +410,7 @@ export const ORBIT_DEFAULTS: OrbitScanParams = {
   bottomAltOffset: 1,
   topAltOffset: -1,
   flipRingDirection: true,
+  totalH: 30,
 };
 
 /** v3 facade 扫描参数默认值 */

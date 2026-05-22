@@ -101,6 +101,7 @@ function buildWaylineSegments(mission: Mission): WaylineSegment[] {
               axisBottom: mission.orbit.axisBottom,
               axisTop: mission.orbit.axisTop,
               radius: mission.orbit.radius,
+              fitPoints: mission.orbit.fitPoints,
               params: mission.orbit.params,
             })
           : undefined,

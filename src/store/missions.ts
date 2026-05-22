@@ -487,12 +487,22 @@ export const useMissionsStore = create<MissionsState>()(
         updateOrbitParams: (patch) =>
           updCurrent((m) => {
             if (m.type !== 'orbit' || !m.orbit) return m;
+            const nextParams = { ...m.orbit.params, ...patch };
+            // totalH 变 → 同步 axisTop.alt = axisBottom.alt + totalH（axis 顶端跟 sheet 联动）
+            const axisTop =
+              'totalH' in patch
+                ? {
+                    ...m.orbit.axisTop,
+                    alt: m.orbit.axisBottom.alt + nextParams.totalH,
+                  }
+                : m.orbit.axisTop;
             return {
               ...m,
               orbit: {
                 ...m.orbit,
-                params: { ...m.orbit.params, ...patch },
-                scanPath: undefined, // 清空让 RecomputeHost 重算
+                axisTop,
+                params: nextParams,
+                scanPath: undefined,
               },
             };
           }),

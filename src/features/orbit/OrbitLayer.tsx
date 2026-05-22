@@ -5,18 +5,19 @@ import { useCurrentMission } from '../../store/missions';
 import { useOrbitPickerStore } from '../../store/orbit-picker';
 import { useUiStore } from '../../store/ui';
 import { wgs84ToCartesian3 } from '../../lib/coord';
+import { AXIS_ABOVE, AXIS_BELOW, type OrbitPartial } from './OrbitPicker';
 import type { OrbitDef, Waypoint } from '../../types/mission';
 
 const COLOR_ORBIT = Cesium.Color.fromCssColorString('#ffd24a');
-const COLOR_AXIS_PICK = Cesium.Color.fromCssColorString('#ffd24a');
 const COLOR_CURSOR = Cesium.Color.fromCssColorString('#ffd24a');
+const COLOR_FIT = Cesium.Color.fromCssColorString('#e8e8e8');
 
 /**
  * Orbit mission 渲染：
  *
- *  - 已保存的 mission.orbit：紫色 axis 线 + 圆柱外环（每圈 polyline）+ scanPath 采样点
- *  - picker preview 时的 OrbitPicker state.preview：同上 + 高亮当前轴 / 半径
- *  - picker drawing 时的中间点：① ② 紫点 + ③ 黄虚线占位
+ *  - 已保存的 mission.orbit：黄 axis 线 + 圆柱外环 + scanPath 采样点
+ *  - picker building（v3.5 4 步累积）：随 partial 字段累积渲染轴线 / bottom marker /
+ *    top marker / 拟合圆 + 圆柱 / radius handle
  *
  * 所有元素参与深度测试（被前景挡住时隐藏，避免穿墙干扰）。
  */
@@ -60,76 +61,222 @@ export function OrbitLayer() {
       renderOrbit(ds, mission.orbit, mission.orbit.scanPath ?? [], 1.0);
     }
 
-    // 2. picker 进行中的状态（drawing/preview/error）
-    if (pickerMode === 'orbit-draw') {
-      if (pickerState.mode === 'drawing') {
-        renderDrawingPoints(ds, pickerState.points);
-      } else if (pickerState.mode === 'preview') {
-        renderOrbit(ds, pickerState.orbit, pickerState.scanPath, 1.0);
-      }
+    // 2. picker 进行中（v3.5 4 步累积 building）
+    if (pickerMode === 'orbit-draw' && pickerState.mode === 'building') {
+      renderBuilding(ds, pickerState.partial, pickerState.scanPath);
     }
   }, [mission, pickerMode, pickerState]);
 
   return null;
 }
 
-function renderDrawingPoints(
+/**
+ * v3.5 building 渲染：根据 partial 已设的字段逐步画 axis / bottom / top / radius / cylinder。
+ *
+ * 渲染层次（z-order ascending）：
+ *  1. axis 长虚线（总是画，alt 范围根据 partial 推断）
+ *  2. axis 实线段（bottom..top 段，bottom+top 都设时）
+ *  3. 拟合圆 + 圆柱外环 + scanPath（partial 全齐 即 step=done）
+ *  4. handles: axis center handle, bottom marker, top marker, radius handle
+ */
+function renderBuilding(
   ds: Cesium.CustomDataSource,
-  points: { lon: number; lat: number; alt: number }[],
+  p: OrbitPartial,
+  scanPath: Waypoint[],
 ): void {
-  const labels = ['① 底心', '② 顶心', '③ 侧点'];
-  points.forEach((p, i) => {
-    ds.entities.add({
-      position: wgs84ToCartesian3(p.lon, p.lat, p.alt),
-      point: {
-        pixelSize: 11,
-        color: COLOR_AXIS_PICK,
-        outlineColor: Cesium.Color.BLACK,
-        outlineWidth: 1.5,
-      },
-      label: {
-        text: labels[i],
-        font: 'bold 11px sans-serif',
-        fillColor: COLOR_AXIS_PICK,
-        outlineColor: Cesium.Color.BLACK,
-        outlineWidth: 2,
-        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-        pixelOffset: new Cesium.Cartesian2(0, -16),
-      },
-    });
+  if (p.axisLon == null || p.axisLat == null) return;
+  const lon = p.axisLon;
+  const lat = p.axisLat;
+
+  // 轴可视的 alt 范围
+  // - 都没设：以 0 为中心 ±AXIS_BELOW
+  // - 只设了 bottom：bottom-200 到 bottom+200
+  // - 都设了：bottom-AXIS_BELOW 到 top+AXIS_ABOVE
+  const bMaybe = p.bottomAlt;
+  const tMaybe = p.topAlt;
+  const lineMin =
+    bMaybe != null ? bMaybe - AXIS_BELOW : tMaybe != null ? tMaybe - AXIS_BELOW : -AXIS_BELOW;
+  const lineMax =
+    tMaybe != null ? tMaybe + AXIS_ABOVE : bMaybe != null ? bMaybe + AXIS_ABOVE : AXIS_ABOVE;
+
+  // axis 长虚线（picker- 前缀让 drillPickFromRay 拖拽时跳过）
+  ds.entities.add({
+    name: 'orbit-picker-axis',
+    polyline: {
+      positions: [
+        wgs84ToCartesian3(lon, lat, lineMin),
+        wgs84ToCartesian3(lon, lat, lineMax),
+      ],
+      width: 2,
+      material: new Cesium.PolylineDashMaterialProperty({
+        color: COLOR_ORBIT.withAlpha(0.55),
+        dashLength: 8,
+      }),
+      arcType: Cesium.ArcType.NONE,
+    },
   });
-  // 已有 ≥2 点：画 axis 线（底↔顶）
-  if (points.length >= 2) {
+
+  // axis 实线段（圆柱长度）
+  if (bMaybe != null && tMaybe != null && tMaybe > bMaybe) {
     ds.entities.add({
+      name: 'orbit-picker-axis-solid',
       polyline: {
         positions: [
-          wgs84ToCartesian3(points[0].lon, points[0].lat, points[0].alt),
-          wgs84ToCartesian3(points[1].lon, points[1].lat, points[1].alt),
+          wgs84ToCartesian3(lon, lat, bMaybe),
+          wgs84ToCartesian3(lon, lat, tMaybe),
         ],
         width: 3,
-        material: COLOR_AXIS_PICK,
+        material: COLOR_ORBIT.withAlpha(0.95),
         arcType: Cesium.ArcType.NONE,
       },
     });
   }
-  // 已有 3 点：画半径辅助线（顶/底中点 → ③）
-  if (points.length === 3) {
+
+  // 完整 orbit 时画圆柱 + scanPath
+  if (
+    p.axisLon != null &&
+    p.axisLat != null &&
+    bMaybe != null &&
+    tMaybe != null &&
+    p.radius != null
+  ) {
+    const orbit: OrbitDef = {
+      axisBottom: { lon, lat, alt: bMaybe },
+      axisTop: { lon, lat, alt: tMaybe },
+      radius: p.radius,
+      params: { ...DEFAULT_PARAMS_FOR_LAYER, totalH: tMaybe - bMaybe },
+    };
+    renderOrbit(ds, orbit, scanPath, 1.0);
+  } else if (p.radius != null && bMaybe != null) {
+    // 没设 top 但设了 radius：画一圈拟合圆（在 bottom 高度上）
+    const ringPositions = sampleCirclePositions(lon, lat, bMaybe, p.radius, 48);
     ds.entities.add({
+      name: 'orbit-picker-fit-ring',
       polyline: {
-        positions: [
-          wgs84ToCartesian3(points[0].lon, points[0].lat, points[0].alt),
-          wgs84ToCartesian3(points[2].lon, points[2].lat, points[0].alt),
-        ],
-        width: 2,
-        material: new Cesium.PolylineDashMaterialProperty({
-          color: COLOR_CURSOR,
-          dashLength: 6,
-        }),
+        positions: ringPositions,
+        width: 1.5,
+        material: COLOR_FIT.withAlpha(0.75),
         arcType: Cesium.ArcType.NONE,
+      },
+    });
+  }
+
+  // ===== Handles =====
+  // axis 中心 handle 的代表 alt
+  const axisRepAlt =
+    bMaybe != null && tMaybe != null ? (bMaybe + tMaybe) / 2 : bMaybe ?? 0;
+  const axisCenterECEF = wgs84ToCartesian3(lon, lat, axisRepAlt);
+  ds.entities.add({
+    name: 'orbit-picker-handle-axis',
+    position: axisCenterECEF,
+    point: {
+      pixelSize: 12,
+      color: COLOR_CURSOR,
+      outlineColor: Cesium.Color.BLACK,
+      outlineWidth: 2.5,
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+    },
+    label: {
+      text: '⌖ 轴 (拖)',
+      font: 'bold 10px sans-serif',
+      fillColor: COLOR_CURSOR,
+      outlineColor: Cesium.Color.BLACK,
+      outlineWidth: 2,
+      style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+      pixelOffset: new Cesium.Cartesian2(14, -2),
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+    },
+  });
+
+  if (bMaybe != null) {
+    ds.entities.add({
+      name: 'orbit-picker-handle-bottom',
+      position: wgs84ToCartesian3(lon, lat, bMaybe),
+      point: {
+        pixelSize: 13,
+        color: COLOR_CURSOR,
+        outlineColor: Cesium.Color.fromCssColorString('#0c0d10'),
+        outlineWidth: 2,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+      label: {
+        text: `▽ 底高 ${bMaybe.toFixed(1)}m`,
+        font: 'bold 10px sans-serif',
+        fillColor: COLOR_CURSOR,
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 2,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        pixelOffset: new Cesium.Cartesian2(14, 2),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    });
+  }
+
+  if (tMaybe != null) {
+    ds.entities.add({
+      name: 'orbit-picker-handle-top',
+      position: wgs84ToCartesian3(lon, lat, tMaybe),
+      point: {
+        pixelSize: 13,
+        color: COLOR_CURSOR,
+        outlineColor: Cesium.Color.fromCssColorString('#0c0d10'),
+        outlineWidth: 2,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+      label: {
+        text: `△ 顶高 ${tMaybe.toFixed(1)}m`,
+        font: 'bold 10px sans-serif',
+        fillColor: COLOR_CURSOR,
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 2,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        pixelOffset: new Cesium.Cartesian2(14, -2),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    });
+  }
+
+  if (p.radius != null && bMaybe != null) {
+    const enu = Cesium.Transforms.eastNorthUpToFixedFrame(
+      wgs84ToCartesian3(lon, lat, bMaybe),
+    );
+    const local = new Cesium.Cartesian3(0, p.radius, 0); // 北侧
+    const edgeECEF = Cesium.Matrix4.multiplyByPoint(enu, local, new Cesium.Cartesian3());
+    ds.entities.add({
+      name: 'orbit-picker-handle-radius',
+      position: edgeECEF,
+      point: {
+        pixelSize: 11,
+        color: COLOR_CURSOR,
+        outlineColor: Cesium.Color.WHITE,
+        outlineWidth: 2,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+      label: {
+        text: `R=${p.radius.toFixed(1)}m (拖)`,
+        font: 'bold 10px sans-serif',
+        fillColor: COLOR_CURSOR,
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 2,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        pixelOffset: new Cesium.Cartesian2(0, -14),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
     });
   }
 }
+
+const DEFAULT_PARAMS_FOR_LAYER = {
+  standoff: 8,
+  verticalSpacing: 3,
+  pointsPerRing: 16,
+  startAngle: 0,
+  direction: 'cw' as const,
+  bottomAltOffset: 1,
+  topAltOffset: -1,
+  flipRingDirection: true,
+  totalH: 30,
+};
 
 function renderOrbit(
   ds: Cesium.CustomDataSource,
@@ -150,6 +297,42 @@ function renderOrbit(
       width: 2,
       material: COLOR_ORBIT.withAlpha(0.7 * alphaScale),
       arcType: Cesium.ArcType.NONE,
+    },
+  });
+
+  // 拟合圆（在 axisBottom 高度上，radius = orbit.radius 不含 standoff）+ 圆心
+  // 区别于"飞行外环"（半径 radius + standoff），让用户看出物体 vs 飞行轨迹
+  const fitRingPositions = sampleCirclePositions(
+    axisBottom.lon,
+    axisBottom.lat,
+    axisBottom.alt,
+    radius,
+    48,
+  );
+  ds.entities.add({
+    polyline: {
+      positions: fitRingPositions,
+      width: 1,
+      material: COLOR_FIT.withAlpha(0.7 * alphaScale),
+      arcType: Cesium.ArcType.NONE,
+    },
+  });
+  ds.entities.add({
+    position: wgs84ToCartesian3(axisBottom.lon, axisBottom.lat, axisBottom.alt),
+    point: {
+      pixelSize: 7,
+      color: COLOR_ORBIT.withAlpha(0.95 * alphaScale),
+      outlineColor: Cesium.Color.BLACK,
+      outlineWidth: 1.5,
+    },
+    label: {
+      text: '+ 圆心',
+      font: 'bold 10px sans-serif',
+      fillColor: COLOR_ORBIT,
+      outlineColor: Cesium.Color.BLACK,
+      outlineWidth: 2,
+      style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+      pixelOffset: new Cesium.Cartesian2(10, 0),
     },
   });
 

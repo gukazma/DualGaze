@@ -2,12 +2,18 @@ import { CircleCheck, AlertCircle, X, Check, RotateCw } from 'lucide-react';
 import { useOrbitPickerStore } from '../store/orbit-picker';
 import { useUiStore } from '../store/ui';
 import { useMissionsStore, useCurrentMission } from '../store/missions';
+import { stepOf, type BuildStep } from '../features/orbit/OrbitPicker';
 import { cn } from '../lib/utils';
 
 /**
- * Orbit picker 顶部浮条。3 步拾取进度 + preview 状态参数摘要 + 反转/保存 按钮。
+ * Orbit picker 顶部浮条（v3.5 4 步累积）。
  *
- * 紫色品牌 `#ffd24a` 区分 facade 的青色 HUD。
+ * 状态 → 文案：
+ *   step axis     "Step 1/4 · 单击设轴位置 (lon/lat)"
+ *   step bottom   "Step 2/4 · 单击设底高（塔脚附近）"
+ *   step top      "Step 3/4 · 单击设顶高（塔顶 / 避雷针）"
+ *   step radius   "Step 4/4 · 按住拖出半径"
+ *   step done     "R=X.Xm · H=Y.Ym · Zwp · 拖任何 handle 微调"
  */
 export function OrbitPickerHud() {
   const pickerMode = useUiStore((s) => s.pickerMode);
@@ -19,24 +25,60 @@ export function OrbitPickerHud() {
 
   if (pickerMode !== 'orbit-draw') return null;
 
-  const pointsCount = state.mode === 'drawing' ? state.points.length : 3;
   const isError = state.mode === 'error';
-  const isPreview = state.mode === 'preview';
+  const isBuilding = state.mode === 'building';
+  const step: BuildStep | null = isBuilding ? stepOf(state.partial) : null;
+  const isDone = step === 'done';
 
   const stepText =
     state.mode === 'error'
       ? state.message
-      : isPreview
-        ? `R=${state.orbit.radius.toFixed(1)}m · H=${(state.orbit.axisTop.alt - state.orbit.axisBottom.alt).toFixed(1)}m · ${state.scanPath.length} wp`
-        : pointsCount === 0
-          ? '① 点塔底中心'
-          : pointsCount === 1
-            ? '② 点塔顶中心 · ↕ 决定高度'
-            : '③ 点塔侧任意墙面 · → 决定半径';
+      : !isBuilding
+        ? ''
+        : step === 'axis'
+          ? 'Step 1/4 · 单击模型设轴位置 (lon/lat)'
+          : step === 'bottom'
+            ? 'Step 2/4 · 单击模型设底高（塔脚附近）'
+            : step === 'top'
+              ? 'Step 3/4 · 单击模型设顶高（塔顶 / 避雷针）'
+              : step === 'radius'
+                ? `Step 4/4 · 按住拖出半径 ${
+                    state.partial.radius != null
+                      ? `· R=${state.partial.radius.toFixed(1)}m`
+                      : ''
+                  }`
+                : `R=${state.partial.radius?.toFixed(1)}m · H=${(
+                    (state.partial.topAlt ?? 0) - (state.partial.bottomAlt ?? 0)
+                  ).toFixed(1)}m · ${state.scanPath.length} wp · 拖任何 handle 微调`;
 
   const handleSave = (): void => {
-    if (state.mode !== 'preview' || mission?.type !== 'orbit') return;
-    setOrbit({ ...state.orbit, scanPath: state.scanPath });
+    if (!isBuilding || !isDone || mission?.type !== 'orbit') return;
+    const p = state.partial;
+    if (
+      p.axisLon == null ||
+      p.axisLat == null ||
+      p.bottomAlt == null ||
+      p.topAlt == null ||
+      p.radius == null
+    )
+      return;
+    setOrbit({
+      axisBottom: { lon: p.axisLon, lat: p.axisLat, alt: p.bottomAlt },
+      axisTop: { lon: p.axisLon, lat: p.axisLat, alt: p.topAlt },
+      radius: p.radius,
+      params: {
+        standoff: 8,
+        verticalSpacing: 3,
+        pointsPerRing: 16,
+        startAngle: 0,
+        direction: 'cw',
+        bottomAltOffset: 1,
+        topAltOffset: -1,
+        flipRingDirection: true,
+        totalH: p.topAlt - p.bottomAlt,
+      },
+      scanPath: state.scanPath,
+    });
     setPickerMode('idle');
   };
 
@@ -50,37 +92,24 @@ export function OrbitPickerHud() {
             : 'border-[#ffd24a] text-text-primary',
         )}
       >
-        {!isPreview && !isError && (
-          <div className="flex items-center gap-1">
-            {[0, 1, 2].map((i) => {
-              const done = i < pointsCount;
-              const active = i === pointsCount;
-              return (
-                <span
-                  key={i}
-                  className={cn(
-                    'flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold',
-                    done
-                      ? 'bg-[#ffd24a]/80 text-bg'
-                      : active
-                        ? 'bg-accent text-bg'
-                        : 'bg-bg-input text-text-muted',
-                  )}
-                >
-                  {i + 1}
-                </span>
-              );
-            })}
-          </div>
+        {isBuilding && !isDone && (
+          <span className="flex h-5 items-center justify-center rounded-full bg-[#ffd24a]/80 px-2 text-[10px] font-bold text-bg">
+            {step === 'axis'
+              ? '1/4'
+              : step === 'bottom'
+                ? '2/4'
+                : step === 'top'
+                  ? '3/4'
+                  : '4/4'}
+          </span>
         )}
-
-        {isPreview && <CircleCheck className="h-4 w-4 text-[#ffd24a]" />}
+        {isDone && <CircleCheck className="h-4 w-4 text-[#ffd24a]" />}
         {isError && <AlertCircle className="h-4 w-4" />}
 
         <span>{stepText}</span>
 
         <span className="ml-1 flex items-center gap-1">
-          {isPreview && (
+          {isDone && (
             <>
               <button
                 type="button"
@@ -110,7 +139,12 @@ export function OrbitPickerHud() {
         <button
           type="button"
           onClick={() => {
-            if (isPreview && !window.confirm('当前有未保存的环绕 preview，确认丢弃？')) return;
+            if (
+              isBuilding &&
+              step !== 'axis' &&
+              !window.confirm('当前有未保存的环绕拾取，确认丢弃？')
+            )
+              return;
             setPickerMode('idle');
           }}
           className="ml-1 rounded p-0.5 text-text-muted hover:bg-bg-input hover:text-text-primary"

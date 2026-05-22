@@ -233,7 +233,7 @@ function OrbitPickerMount() {
   useEffect(() => {
     if (!viewer) return;
     if (pickerMode !== 'orbit-draw') {
-      setPickerState({ mode: 'drawing', points: [] });
+      setPickerState({ mode: 'building', partial: {}, scanPath: [] });
       setFlipPreviewDirection(null);
       return;
     }
@@ -243,7 +243,7 @@ function OrbitPickerMount() {
     return () => {
       unsub();
       picker.destroy();
-      setPickerState({ mode: 'drawing', points: [] });
+      setPickerState({ mode: 'building', partial: {}, scanPath: [] });
       setFlipPreviewDirection(null);
     };
   }, [viewer, pickerMode, setPickerState, setFlipPreviewDirection]);

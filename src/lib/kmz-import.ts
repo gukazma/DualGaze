@@ -375,6 +375,7 @@ function parseOrbitDef(text: string | null): OrbitDef | null {
       axisBottom: j.axisBottom,
       axisTop: j.axisTop,
       radius: j.radius,
+      fitPoints: Array.isArray(j.fitPoints) ? j.fitPoints : undefined,
       params: { ...ORBIT_DEFAULTS, ...(j.params ?? {}) },
     };
   } catch {
