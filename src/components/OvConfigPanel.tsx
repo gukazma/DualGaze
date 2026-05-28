@@ -27,8 +27,9 @@ import { useCurrentMission, useMissionsStore } from '../store/missions';
 import { useUiStore } from '../store/ui';
 import { useOvPickerStore } from '../store/ov-picker';
 import { useOvSamplingStore } from '../store/ov-sampling';
+import { useOvViewGenStore } from '../store/ov-viewgen';
 import { OvAoiPicker } from '../features/ov/OvAoiPicker';
-import type { OvCameraSpec, OvDef } from '../types/mission';
+import type { OvCameraSpec, OvDef, OvViewGenParams } from '../types/mission';
 
 type BadgeState = 'pending' | 'configured' | 'computing' | 'done' | 'invalid';
 
@@ -51,6 +52,12 @@ export function OvConfigPanel() {
   const triggerSampling = useOvSamplingStore((s) => s.trigger);
   const cancelSampling = useOvSamplingStore((s) => s.cancel);
   const resetSampling = useOvSamplingStore((s) => s.reset);
+  const updateOvViewGenParams = useMissionsStore((s) => s.updateOvViewGenParams);
+  const viewGenStatus = useOvViewGenStore((s) => s.status);
+  const viewGenProgress = useOvViewGenStore((s) => s.progress);
+  const triggerViewGen = useOvViewGenStore((s) => s.trigger);
+  const cancelViewGen = useOvViewGenStore((s) => s.cancel);
+  const resetViewGen = useOvViewGenStore((s) => s.reset);
 
   if (!mission || mission.type !== 'ov' || !mission.ov) return null;
   const ov = mission.ov;
@@ -96,6 +103,23 @@ export function OvConfigPanel() {
   const handleStartSampling = (): void => {
     resetSampling();
     triggerSampling();
+  };
+
+  const samplesReady = !!ov.samples && ov.samples.length > 0;
+  const candidateCount = ov.candidateViews?.length ?? 0;
+  const handleStartViewGen = (): void => {
+    resetViewGen();
+    triggerViewGen();
+  };
+  const toggleSideVariant = (key: keyof OvViewGenParams['sideVariants']): void => {
+    updateOvViewGenParams({
+      sideVariants: { ...ov.viewGenParams.sideVariants, [key]: !ov.viewGenParams.sideVariants[key] },
+    });
+  };
+  const toggleTopVariant = (key: keyof OvViewGenParams['topVariants']): void => {
+    updateOvViewGenParams({
+      topVariants: { ...ov.viewGenParams.topVariants, [key]: !ov.viewGenParams.topVariants[key] },
+    });
   };
 
   return (
@@ -324,7 +348,80 @@ export function OvConfigPanel() {
 
       {/* M32 · 4 视角生成 */}
       <Card icon={<Eye className="h-3 w-3 text-accent" />} title="4 视角生成" badge={stage4Badge}>
-        <Placeholder text="M32 · 待实施" detail="9 视角变体 · 7 调整策略 · 遮挡测试" />
+        <SectionLabel>侧视变体</SectionLabel>
+        <div className="flex flex-wrap gap-1">
+          <VariantChip label="原视角" on={ov.viewGenParams.sideVariants.original} onClick={() => toggleSideVariant('original')} />
+          <VariantChip label="平视" on={ov.viewGenParams.sideVariants.horizontal} onClick={() => toggleSideVariant('horizontal')} />
+          <VariantChip label="左移" on={ov.viewGenParams.sideVariants.leftShift} onClick={() => toggleSideVariant('leftShift')} />
+          <VariantChip label="右移" on={ov.viewGenParams.sideVariants.rightShift} onClick={() => toggleSideVariant('rightShift')} />
+        </div>
+        <SectionLabel>顶视变体</SectionLabel>
+        <div className="flex flex-wrap gap-1">
+          <VariantChip label="原" on={ov.viewGenParams.topVariants.original} onClick={() => toggleTopVariant('original')} />
+          <VariantChip label="北" on={ov.viewGenParams.topVariants.north} onClick={() => toggleTopVariant('north')} />
+          <VariantChip label="东" on={ov.viewGenParams.topVariants.east} onClick={() => toggleTopVariant('east')} />
+          <VariantChip label="南" on={ov.viewGenParams.topVariants.south} onClick={() => toggleTopVariant('south')} />
+          <VariantChip label="西" on={ov.viewGenParams.topVariants.west} onClick={() => toggleTopVariant('west')} />
+        </div>
+        <Row label="pitch 范围">
+          <span className="rounded border border-border bg-bg-input px-2 py-1 font-mono text-[11px] text-text-primary">
+            {ov.viewGenParams.pitchRange[0]}° ~ {ov.viewGenParams.pitchRange[1]}°
+          </span>
+        </Row>
+
+        {viewGenStatus === 'running' && viewGenProgress && (
+          <div className="flex flex-col gap-1.5 rounded border border-accent/40 bg-[#2c1308] p-2">
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="font-semibold text-[#ffaa4a]">⚡ 生成中</span>
+              <span className="font-mono text-[#ffaa4a]">
+                {viewGenProgress.done} / {viewGenProgress.total} · {viewGenProgress.views} 视角
+              </span>
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-bg">
+              <div
+                className="h-full bg-[#ffaa4a] transition-all"
+                style={{ width: `${Math.min(100, (viewGenProgress.done / Math.max(1, viewGenProgress.total)) * 100)}%` }}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={cancelViewGen}
+              className="mt-1 rounded border border-accent-danger/40 bg-bg-input px-2 py-1 text-[10px] font-semibold text-accent-danger hover:bg-[#1a0d0d]"
+            >
+              取消
+            </button>
+          </div>
+        )}
+        {candidateCount > 0 && viewGenStatus !== 'running' && (
+          <div className="flex items-center justify-between rounded border border-mint/30 bg-[#0e2920] px-2 py-1.5">
+            <span className="text-[11px] text-mint">✓ {candidateCount} 个候选视角</span>
+            {viewGenProgress && (
+              <span className="font-mono text-[10px] text-text-secondary">
+                {(viewGenProgress.elapsedMs / 1000).toFixed(1)}s
+              </span>
+            )}
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={handleStartViewGen}
+          disabled={!samplesReady || viewGenStatus === 'running'}
+          className={cn(
+            'flex items-center justify-center gap-1.5 rounded border px-2 py-1.5 text-[11px] font-semibold',
+            samplesReady && viewGenStatus !== 'running'
+              ? 'border-accent bg-[#2a2113] text-accent hover:bg-[#3a2f0d]'
+              : 'border-border bg-bg-input text-text-muted opacity-60',
+          )}
+        >
+          {viewGenStatus === 'running'
+            ? '运行中...'
+            : candidateCount > 0
+              ? '▶ 重新生成视角'
+              : samplesReady
+                ? '▶ 生成视角'
+                : '需先采样'}
+        </button>
+        <div className="text-[10px] text-text-muted">法向估计 + 9 变体 + 7 策略 + 遮挡检测</div>
       </Card>
 
       {/* M33 · 5 视角优化 */}
@@ -515,6 +612,32 @@ function NumField({
       />
       {unit && <span className="text-[10px] text-text-muted">{unit}</span>}
     </label>
+  );
+}
+
+function VariantChip({
+  label,
+  on,
+  onClick,
+}: {
+  label: string;
+  on: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'rounded px-2 py-1 text-[10px] font-semibold transition',
+        on
+          ? 'border border-accent bg-[#2a2113] text-accent'
+          : 'border border-border bg-bg-input text-text-muted hover:border-text-secondary',
+      )}
+    >
+      {on ? '✓ ' : ''}
+      {label}
+    </button>
   );
 }
 

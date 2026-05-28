@@ -4,7 +4,10 @@ import { useCesiumViewer } from '../cesium/CesiumContext';
 import { useCurrentMission } from '../../store/missions';
 import { useOvPickerStore } from '../../store/ov-picker';
 import { wgs84ToCartesian3 } from '../../lib/coord';
-import type { OvAoi, OvSamplePoint } from '../../types/mission';
+import type { OvAoi, OvSamplePoint, OvViewCandidate } from '../../types/mission';
+
+/** 候选视角箭头渲染上限，防止上万个 polyline 卡顿 */
+const MAX_VIEW_ARROWS = 1500;
 
 /**
  * OV 主视图渲染层 —— AOI 多边形 + 采样点。
@@ -105,6 +108,14 @@ export function OvLayer() {
     if (mission.ov.samples && mission.ov.samples.length > 0) {
       renderSamples(ds, mission.ov.samples);
     }
+
+    // 4. 候选视角箭头（M32）。selectedViews 优先；否则画 candidateViews
+    const views = mission.ov.selectedViews?.length
+      ? mission.ov.selectedViews
+      : mission.ov.candidateViews;
+    if (views && views.length > 0 && mission.ov.samples) {
+      renderViews(ds, views, mission.ov.samples);
+    }
   }, [ds, mission, aoiPickerState]);
 
   return null;
@@ -172,6 +183,46 @@ function renderSamples(
         color: Cesium.Color.fromCssColorString(color),
         outlineColor: Cesium.Color.fromCssColorString('#0c0d10'),
         outlineWidth: 0.5,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    });
+  }
+}
+
+/**
+ * 候选/已选视角箭头：相机位 → 采样点的短线 + 相机端小点。
+ * 超过 MAX_VIEW_ARROWS 时按步长抽稀，避免上万 polyline 卡顿。
+ */
+function renderViews(
+  ds: Cesium.CustomDataSource,
+  views: OvViewCandidate[],
+  samples: OvSamplePoint[],
+): void {
+  const sampleMap = new Map<string, OvSamplePoint>();
+  for (const s of samples) sampleMap.set(s.id, s);
+
+  const stride = views.length > MAX_VIEW_ARROWS ? Math.ceil(views.length / MAX_VIEW_ARROWS) : 1;
+  for (let i = 0; i < views.length; i += stride) {
+    const v = views[i];
+    const target = sampleMap.get(v.targetSampleId);
+    if (!target) continue;
+    const camPos = wgs84ToCartesian3(v.camLon, v.camLat, v.camAlt);
+    const tgtPos = wgs84ToCartesian3(target.lon, target.lat, target.alt);
+    ds.entities.add({
+      name: `ov-layer-view-${v.id}`,
+      polyline: {
+        positions: [camPos, tgtPos],
+        width: 1,
+        material: Cesium.Color.fromCssColorString('#38bdf8').withAlpha(0.5),
+        arcType: Cesium.ArcType.NONE,
+      },
+    });
+    ds.entities.add({
+      name: `ov-layer-viewcam-${v.id}`,
+      position: camPos,
+      point: {
+        pixelSize: 3,
+        color: Cesium.Color.fromCssColorString('#38bdf8'),
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
     });
