@@ -17,6 +17,7 @@ import { OvLayer } from './features/ov/OvLayer';
 import { OvAoiPickerMount } from './features/ov/OvAoiPickerMount';
 import { OvSamplingHost } from './features/ov/OvSamplingHost';
 import { OvViewGenHost } from './features/ov/OvViewGenHost';
+import { OvViewOptHost } from './features/ov/OvViewOptHost';
 import { useFacadePickerStore } from './store/facade-picker';
 import { useOrbitPickerStore } from './store/orbit-picker';
 import { useUiStore } from './store/ui';
@@ -115,6 +116,7 @@ export function App() {
           {isOv && <OvAoiPickerMount />}
           {isOv && <OvSamplingHost />}
           {isOv && <OvViewGenHost />}
+          {isOv && <OvViewOptHost />}
           {needsTileset && <TakeoffLayer />}
           {needsTileset && <TakeoffPickerMount />}
           {isMapping ? <MappingLayer /> : isFacade || isOrbit || isOv ? null : <WaypointLayer />}

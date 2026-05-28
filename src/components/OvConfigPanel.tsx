@@ -28,8 +28,9 @@ import { useUiStore } from '../store/ui';
 import { useOvPickerStore } from '../store/ov-picker';
 import { useOvSamplingStore } from '../store/ov-sampling';
 import { useOvViewGenStore } from '../store/ov-viewgen';
+import { useOvViewOptStore } from '../store/ov-viewopt';
 import { OvAoiPicker } from '../features/ov/OvAoiPicker';
-import type { OvCameraSpec, OvDef, OvViewGenParams } from '../types/mission';
+import type { OvCameraSpec, OvDef, OvViewGenParams, OvViewOptParams } from '../types/mission';
 
 type BadgeState = 'pending' | 'configured' | 'computing' | 'done' | 'invalid';
 
@@ -58,6 +59,12 @@ export function OvConfigPanel() {
   const triggerViewGen = useOvViewGenStore((s) => s.trigger);
   const cancelViewGen = useOvViewGenStore((s) => s.cancel);
   const resetViewGen = useOvViewGenStore((s) => s.reset);
+  const updateOvViewOptParams = useMissionsStore((s) => s.updateOvViewOptParams);
+  const viewOptStatus = useOvViewOptStore((s) => s.status);
+  const viewOptProgress = useOvViewOptStore((s) => s.progress);
+  const triggerViewOpt = useOvViewOptStore((s) => s.trigger);
+  const cancelViewOpt = useOvViewOptStore((s) => s.cancel);
+  const resetViewOpt = useOvViewOptStore((s) => s.reset);
 
   if (!mission || mission.type !== 'ov' || !mission.ov) return null;
   const ov = mission.ov;
@@ -120,6 +127,16 @@ export function OvConfigPanel() {
     updateOvViewGenParams({
       topVariants: { ...ov.viewGenParams.topVariants, [key]: !ov.viewGenParams.topVariants[key] },
     });
+  };
+
+  const candidatesReady = candidateCount > 0;
+  const selectedCount = ov.selectedViews?.length ?? 0;
+  const handleStartViewOpt = (): void => {
+    resetViewOpt();
+    triggerViewOpt();
+  };
+  const setOptMethod = (method: OvViewOptParams['method']): void => {
+    updateOvViewOptParams({ method });
   };
 
   return (
@@ -426,7 +443,70 @@ export function OvConfigPanel() {
 
       {/* M33 · 5 视角优化 */}
       <Card icon={<Wand2 className="h-3 w-3 text-accent-cyan" />} title="5 视角优化" badge={stage5Badge}>
-        <Placeholder text="M33 · 待实施" detail="set cover · 角度法 / 半球法" />
+        <SectionLabel>优化方法</SectionLabel>
+        <div className="flex gap-1.5">
+          <VariantChip label="角度法" on={ov.viewOptParams.method === 'angle'} onClick={() => setOptMethod('angle')} />
+          <VariantChip label="半球法" on={ov.viewOptParams.method === 'hemisphere'} onClick={() => setOptMethod('hemisphere')} />
+        </div>
+        {ov.viewOptParams.method === 'angle' ? (
+          <>
+            <Row label="alpha α">
+              <NumField value={ov.viewOptParams.alpha} unit="°" step={1} min={5} max={120} onChange={(v) => updateOvViewOptParams({ alpha: v })} />
+            </Row>
+            <Row label="视角个数 K">
+              <NumField value={ov.viewOptParams.viewCount} unit="" step={1} min={1} max={60} onChange={(v) => updateOvViewOptParams({ viewCount: v })} />
+            </Row>
+          </>
+        ) : (
+          <>
+            <Row label="半衰面数">
+              <NumField value={ov.viewOptParams.halfDecayFaces} unit="" step={1} min={3} max={24} onChange={(v) => updateOvViewOptParams({ halfDecayFaces: v })} />
+            </Row>
+            <Row label="视角个数 K">
+              <NumField value={ov.viewOptParams.viewCount} unit="" step={1} min={1} max={60} onChange={(v) => updateOvViewOptParams({ viewCount: v })} />
+            </Row>
+          </>
+        )}
+        <Row label="终止数 (0=自动)">
+          <NumField value={ov.viewOptParams.terminationCount} unit="" step={50} min={0} max={20000} onChange={(v) => updateOvViewOptParams({ terminationCount: v })} />
+        </Row>
+
+        {viewOptStatus === 'running' && viewOptProgress && (
+          <div className="flex flex-col gap-1.5 rounded border border-accent/40 bg-[#2c1308] p-2">
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="font-semibold text-[#ffaa4a]">⚡ 优化中</span>
+              <span className="font-mono text-[#ffaa4a]">
+                选 {viewOptProgress.selected} · 达标 {viewOptProgress.coveredSamples}/{viewOptProgress.totalSamples}
+              </span>
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-bg">
+              <div className="h-full bg-[#ffaa4a] transition-all" style={{ width: `${Math.min(100, (viewOptProgress.coveredSamples / Math.max(1, viewOptProgress.totalSamples)) * 100)}%` }} />
+            </div>
+            <button type="button" onClick={cancelViewOpt} className="mt-1 rounded border border-accent-danger/40 bg-bg-input px-2 py-1 text-[10px] font-semibold text-accent-danger hover:bg-[#1a0d0d]">取消</button>
+          </div>
+        )}
+        {selectedCount > 0 && viewOptStatus !== 'running' && (
+          <div className="flex items-center justify-between rounded border border-mint/30 bg-[#0e2920] px-2 py-1.5">
+            <span className="text-[11px] text-mint">✓ {candidateCount} → {selectedCount} 视角</span>
+            {ov.visibility && (
+              <span className="font-mono text-[10px] text-text-secondary">平均覆盖 {ov.visibility.avgCoverage.toFixed(1)}</span>
+            )}
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={handleStartViewOpt}
+          disabled={!candidatesReady || viewOptStatus === 'running'}
+          className={cn(
+            'flex items-center justify-center gap-1.5 rounded border px-2 py-1.5 text-[11px] font-semibold',
+            candidatesReady && viewOptStatus !== 'running'
+              ? 'border-accent bg-[#2a2113] text-accent hover:bg-[#3a2f0d]'
+              : 'border-border bg-bg-input text-text-muted opacity-60',
+          )}
+        >
+          {viewOptStatus === 'running' ? '运行中...' : selectedCount > 0 ? '▶ 重新优化' : candidatesReady ? '▶ 视角优化' : '需先生成视角'}
+        </button>
+        <div className="text-[10px] text-text-muted">set-cover 贪心 · 采样点按覆盖度 6 色热图染色</div>
       </Card>
 
       {/* M34 · 6 路径生成 */}
