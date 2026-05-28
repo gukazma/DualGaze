@@ -30,6 +30,7 @@ import { useOvSamplingStore } from '../store/ov-sampling';
 import { useOvViewGenStore } from '../store/ov-viewgen';
 import { useOvViewOptStore } from '../store/ov-viewopt';
 import { useOvPathGenStore } from '../store/ov-pathgen';
+import { useOvDisplayStore, type OvDisplayKey } from '../store/ov-display';
 import { OvAoiPicker } from '../features/ov/OvAoiPicker';
 import type {
   OvCameraSpec,
@@ -50,8 +51,16 @@ interface BadgeInfo {
 export function OvConfigPanel() {
   const mission = useCurrentMission();
   const updateOvCameraParams = useMissionsStore((s) => s.updateOvCameraParams);
+  const updateOvSafetyHull = useMissionsStore((s) => s.updateOvSafetyHull);
+  const removeOvObstacle = useMissionsStore((s) => s.removeOvObstacle);
+  const removeOvNoFly = useMissionsStore((s) => s.removeOvNoFly);
   const setOvAoi = useMissionsStore((s) => s.setOvAoi);
   const setOvSamples = useMissionsStore((s) => s.setOvSamples);
+  const setOvCandidateViews = useMissionsStore((s) => s.setOvCandidateViews);
+  const setOvSelectedViews = useMissionsStore((s) => s.setOvSelectedViews);
+  const setOvPaths = useMissionsStore((s) => s.setOvPaths);
+  const setOvVisibility = useMissionsStore((s) => s.setOvVisibility);
+  const display = useOvDisplayStore();
   const setPickerMode = useUiStore((s) => s.setPickerMode);
   const pickerMode = useUiStore((s) => s.pickerMode);
   const aoiPickerState = useOvPickerStore((s) => s.aoiState);
@@ -171,6 +180,35 @@ export function OvConfigPanel() {
   const setSortieStrategy = (strategy: OvSplitParams['strategy']): void => {
     updateOvSplitParams({ strategy });
   };
+
+  // 视图清理（级联）
+  const cleanSamples = (): void => {
+    setOvSamples(undefined);
+    setOvCandidateViews(undefined);
+    setOvSelectedViews(undefined);
+    setOvPaths(undefined);
+    setOvVisibility(undefined);
+  };
+  const cleanViews = (): void => {
+    setOvCandidateViews(undefined);
+    setOvSelectedViews(undefined);
+    setOvPaths(undefined);
+    setOvVisibility(undefined);
+  };
+  const cleanPaths = (): void => {
+    setOvPaths(undefined);
+  };
+  const cleanAll = (): void => {
+    setOvAoi(undefined);
+    cleanSamples();
+  };
+  const toggleDisplay = (key: OvDisplayKey): void => useOvDisplayStore.getState().toggle(key);
+  const setAllDisplay = (on: boolean): void => useOvDisplayStore.getState().setAll(on);
+
+  const isPickingObstacle = pickerMode === 'ov-obstacle-pick';
+  const isPickingNoFly = pickerMode === 'ov-nofly-pick';
+  const obstacleCount = ov.insertObstacles.length;
+  const noFlyCount = ov.noFlyZones.length;
 
   return (
     <div className="flex flex-col gap-2.5">
@@ -325,9 +363,62 @@ export function OvConfigPanel() {
         </Row>
       </Card>
 
-      {/* M31a · 2 安全&禁飞 */}
+      {/* M35 · 2 安全&禁飞 */}
       <Card icon={<ShieldCheck className="h-3 w-3 text-accent-cyan" />} title="2 安全&禁飞" badge={stage2Badge}>
-        <Placeholder text="M31a · 待实施" detail="安全距离/高度 · 障碍物 · 禁飞区" />
+        <Row label="安全距离">
+          <NumField value={ov.safetyHull.safetyDistance} unit="m" step={1} min={0} max={100} onChange={(v) => updateOvSafetyHull({ safetyDistance: v })} />
+        </Row>
+        <Row label="安全高度">
+          <NumField value={ov.safetyHull.safetyHeight} unit="m" step={1} min={0} max={100} onChange={(v) => updateOvSafetyHull({ safetyHeight: v })} />
+        </Row>
+        <SectionLabel>障碍物 / 禁飞区</SectionLabel>
+        <div className="flex gap-1.5">
+          <button
+            type="button"
+            onClick={() => setPickerMode(isPickingObstacle ? 'idle' : 'ov-obstacle-pick')}
+            className={cn(
+              'flex-1 rounded border px-2 py-1.5 text-[10px] font-semibold',
+              isPickingObstacle
+                ? 'border-violet bg-[#1a1a2c] text-violet'
+                : 'border-dashed border-violet/60 bg-bg-input text-violet hover:bg-[#1a1a2c]',
+            )}
+          >
+            {isPickingObstacle ? '双击 3 点…' : '+ 障碍物'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setPickerMode(isPickingNoFly ? 'idle' : 'ov-nofly-pick')}
+            className={cn(
+              'flex-1 rounded border px-2 py-1.5 text-[10px] font-semibold',
+              isPickingNoFly
+                ? 'border-accent-danger bg-[#1a0d0d] text-accent-danger'
+                : 'border-dashed border-accent-danger/60 bg-bg-input text-accent-danger hover:bg-[#1a0d0d]',
+            )}
+          >
+            {isPickingNoFly ? '单击加点 双击完成' : '+ 禁飞区'}
+          </button>
+        </div>
+        {(obstacleCount > 0 || noFlyCount > 0) && (
+          <div className="flex flex-col gap-1 rounded border border-border bg-[#131720] px-2 py-1.5">
+            {ov.insertObstacles.map((o, i) => (
+              <div key={o.id} className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5 text-[10px] text-violet">
+                  <span className="inline-block h-2 w-2 rounded-sm bg-violet" />障碍 {i + 1} · {o.height}m
+                </span>
+                <button type="button" onClick={() => removeOvObstacle(o.id)} className="text-[10px] text-text-muted hover:text-accent-danger">删</button>
+              </div>
+            ))}
+            {ov.noFlyZones.map((z, i) => (
+              <div key={z.id} className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5 text-[10px] text-accent-danger">
+                  <span className="inline-block h-2 w-2 rounded-sm bg-accent-danger" />禁飞 {i + 1} · {z.minHeight}~{z.maxHeight}m
+                </span>
+                <button type="button" onClick={() => removeOvNoFly(z.id)} className="text-[10px] text-text-muted hover:text-accent-danger">删</button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="text-[10px] text-text-muted">障碍须在采样前插入 · 禁飞区会剔除区内采样点</div>
       </Card>
 
       {/* M31b · 3 采样 */}
@@ -642,7 +733,39 @@ export function OvConfigPanel() {
 
       {/* M36/M37 · 8 模拟&导出 */}
       <Card icon={<Send className="h-3 w-3 text-accent-cyan" />} title="8 模拟&导出" badge={stage8Badge}>
-        <Placeholder text="M36/M37 · 待实施" detail="模拟飞行 · KMZ round-trip · 多格式" />
+        {pathsReady ? (
+          <div className="rounded border border-mint/30 bg-[#0e2920] px-2 py-1.5 text-[11px] text-mint">
+            ✓ {sortieCount} 架次 · {totalPathWaypoints} 航点 已就绪
+          </div>
+        ) : (
+          <div className="rounded border border-border bg-bg-input px-2 py-1.5 text-[11px] text-text-muted">
+            完成 1-7 阶段后可模拟 / 导出
+          </div>
+        )}
+        <div className="text-[10px] text-text-muted">
+          顶栏 [模拟飞行] 预览全套架次 · [导出 KMZ] 给 DJI Pilot 2
+        </div>
+
+        <SectionLabel>显示开关</SectionLabel>
+        <div className="flex flex-wrap gap-1">
+          <VariantChip label="AOI" on={display.showAoi} onClick={() => toggleDisplay('showAoi')} />
+          <VariantChip label="采样点" on={display.showSamples} onClick={() => toggleDisplay('showSamples')} />
+          <VariantChip label="法向" on={display.showNormals} onClick={() => toggleDisplay('showNormals')} />
+          <VariantChip label="视角" on={display.showViews} onClick={() => toggleDisplay('showViews')} />
+          <VariantChip label="航线" on={display.showPaths} onClick={() => toggleDisplay('showPaths')} />
+        </div>
+        <div className="flex gap-1.5">
+          <button type="button" onClick={() => setAllDisplay(true)} className="flex-1 rounded border border-border bg-bg-input px-2 py-1 text-[10px] font-semibold text-accent hover:border-accent">全开</button>
+          <button type="button" onClick={() => setAllDisplay(false)} className="flex-1 rounded border border-border bg-bg-input px-2 py-1 text-[10px] font-semibold text-text-secondary hover:border-text-secondary">全关</button>
+        </div>
+
+        <SectionLabel>视图清理</SectionLabel>
+        <div className="flex flex-wrap gap-1.5">
+          <button type="button" onClick={cleanPaths} className="rounded border border-border bg-bg-input px-2 py-1 text-[10px] text-text-secondary hover:border-accent-danger hover:text-accent-danger">清航线</button>
+          <button type="button" onClick={cleanViews} className="rounded border border-border bg-bg-input px-2 py-1 text-[10px] text-text-secondary hover:border-accent-danger hover:text-accent-danger">清视角</button>
+          <button type="button" onClick={cleanSamples} className="rounded border border-border bg-bg-input px-2 py-1 text-[10px] text-text-secondary hover:border-accent-danger hover:text-accent-danger">清采样</button>
+          <button type="button" onClick={cleanAll} className="rounded border border-accent-danger/40 bg-[#1a0d0d] px-2 py-1 text-[10px] font-semibold text-accent-danger hover:bg-[#2a1010]">全部重置</button>
+        </div>
       </Card>
     </div>
   );
@@ -839,14 +962,5 @@ function VariantChip({
       {on ? '✓ ' : ''}
       {label}
     </button>
-  );
-}
-
-function Placeholder({ text, detail }: { text: string; detail: string }) {
-  return (
-    <div className="flex flex-col gap-1 rounded border border-dashed border-border bg-bg-input px-3 py-2.5">
-      <span className="text-[11px] font-semibold text-text-secondary">{text}</span>
-      <span className="text-[10px] text-text-muted">{detail}</span>
-    </div>
   );
 }

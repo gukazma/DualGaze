@@ -57,6 +57,7 @@ export function OvSamplingHost() {
       ov.cameraParams,
       (p) => setProgress(p),
       isCancelled,
+      ov.noFlyZones,
     )
       .then((samples) => {
         if (statusRef.current === 'cancelled') return;

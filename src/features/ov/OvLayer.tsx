@@ -3,8 +3,16 @@ import * as Cesium from 'cesium';
 import { useCesiumViewer } from '../cesium/CesiumContext';
 import { useCurrentMission } from '../../store/missions';
 import { useOvPickerStore } from '../../store/ov-picker';
+import { useOvDisplayStore } from '../../store/ov-display';
 import { wgs84ToCartesian3 } from '../../lib/coord';
-import type { OvAoi, OvSamplePoint, OvSortie, OvViewCandidate } from '../../types/mission';
+import type {
+  OvAoi,
+  OvNoFlyZone,
+  OvObstacleBox,
+  OvSamplePoint,
+  OvSortie,
+  OvViewCandidate,
+} from '../../types/mission';
 
 /** 候选视角箭头渲染上限，防止上万个 polyline 卡顿 */
 const MAX_VIEW_ARROWS = 1500;
@@ -25,6 +33,8 @@ export function OvLayer() {
   const viewer = useCesiumViewer();
   const mission = useCurrentMission();
   const aoiPickerState = useOvPickerStore((s) => s.aoiState);
+  const auxPreview = useOvPickerStore((s) => s.auxPreview);
+  const display = useOvDisplayStore();
   // 用 state 而非 ref —— ds 准备好后 setDs 会触发 render effect 重跑
   // （viewer 异步初始化时 ref 不会触发依赖更新，会导致初载入 AOI 不画）
   const [ds, setDs] = useState<Cesium.CustomDataSource | null>(null);
@@ -48,7 +58,7 @@ export function OvLayer() {
     if (!mission || mission.type !== 'ov' || !mission.ov) return;
 
     // 1. 已 commit AOI（黄色虚线 + 顶点小点）
-    if (mission.ov.aoi && mission.ov.aoi.vertices.length >= 3) {
+    if (display.showAoi && mission.ov.aoi && mission.ov.aoi.vertices.length >= 3) {
       renderAoi(ds, mission.ov.aoi, 'ov-layer-aoi', '#ffd24a', false);
     }
 
@@ -104,15 +114,15 @@ export function OvLayer() {
       }
     }
 
-    // 3. 采样点散布
-    if (mission.ov.samples && mission.ov.samples.length > 0) {
-      renderSamples(ds, mission.ov.samples);
+    // 3. 采样点散布（+ 可选法向箭头）
+    if (display.showSamples && mission.ov.samples && mission.ov.samples.length > 0) {
+      renderSamples(ds, mission.ov.samples, display.showNormals);
     }
 
-    // 4. 路径优先：有 paths 画多架次航线折线；否则画候选/已选视角箭头
-    if (mission.ov.paths && mission.ov.paths.length > 0) {
+    // 4. 路径优先：有 paths 且开 showPaths 画航线；否则按 showViews 画视角箭头
+    if (display.showPaths && mission.ov.paths && mission.ov.paths.length > 0) {
       renderPaths(ds, mission.ov.paths);
-    } else {
+    } else if (display.showViews) {
       const views = mission.ov.selectedViews?.length
         ? mission.ov.selectedViews
         : mission.ov.candidateViews;
@@ -120,7 +130,44 @@ export function OvLayer() {
         renderViews(ds, views, mission.ov.samples);
       }
     }
-  }, [ds, mission, aoiPickerState]);
+
+    // 5. 安全：障碍盒 + 禁飞多边形（showSafety）
+    if (display.showSafety) {
+      for (const obs of mission.ov.insertObstacles) renderObstacle(ds, obs);
+      for (const z of mission.ov.noFlyZones) renderNoFly(ds, z);
+    }
+
+    // 6. aux picker 累加中的临时点 + 连线
+    if (auxPreview.length > 0) {
+      auxPreview.forEach((p, i) => {
+        ds.entities.add({
+          name: `ov-aux-picker-pt-${i}`,
+          position: wgs84ToCartesian3(p.lon, p.lat, p.alt),
+          point: {
+            pixelSize: 9,
+            color: Cesium.Color.fromCssColorString('#a78bfa'),
+            outlineColor: Cesium.Color.fromCssColorString('#0c0d10'),
+            outlineWidth: 1,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          },
+        });
+      });
+      if (auxPreview.length >= 2) {
+        ds.entities.add({
+          name: 'ov-aux-picker-line',
+          polyline: {
+            positions: auxPreview.map((p) => wgs84ToCartesian3(p.lon, p.lat, p.alt)),
+            width: 2,
+            material: new Cesium.PolylineDashMaterialProperty({
+              color: Cesium.Color.fromCssColorString('#a78bfa'),
+              dashLength: 10,
+            }),
+            arcType: Cesium.ArcType.NONE,
+          },
+        });
+      }
+    }
+  }, [ds, mission, aoiPickerState, auxPreview, display]);
 
   return null;
 }
@@ -176,12 +223,14 @@ function renderAoi(
 function renderSamples(
   ds: Cesium.CustomDataSource,
   samples: OvSamplePoint[],
+  showNormals: boolean,
 ): void {
   for (const s of samples) {
     const color = visibilityColor(s.coverCount);
+    const posECEF = wgs84ToCartesian3(s.lon, s.lat, s.alt);
     ds.entities.add({
       name: `ov-layer-sample-${s.id}`,
-      position: wgs84ToCartesian3(s.lon, s.lat, s.alt),
+      position: posECEF,
       point: {
         pixelSize: 6,
         color: Cesium.Color.fromCssColorString(color),
@@ -190,6 +239,24 @@ function renderSamples(
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
     });
+    // 法向箭头（ENU normal → ECEF，长 3m）
+    if (showNormals) {
+      const enu = Cesium.Transforms.eastNorthUpToFixedFrame(posECEF);
+      const tip = Cesium.Matrix4.multiplyByPoint(
+        enu,
+        new Cesium.Cartesian3(s.normal[0] * 3, s.normal[1] * 3, s.normal[2] * 3),
+        new Cesium.Cartesian3(),
+      );
+      ds.entities.add({
+        name: `ov-layer-normal-${s.id}`,
+        polyline: {
+          positions: [posECEF, tip],
+          width: 1,
+          material: Cesium.Color.fromCssColorString('#94a3b8').withAlpha(0.6),
+          arcType: Cesium.ArcType.NONE,
+        },
+      });
+    }
   }
 }
 
@@ -231,6 +298,51 @@ function renderViews(
       },
     });
   }
+}
+
+/** 障碍盒：3 点定矩形（补第 4 角）→ 挤出 height 的紫色半透明盒。 */
+function renderObstacle(ds: Cesium.CustomDataSource, obs: OvObstacleBox): void {
+  if (obs.corners.length < 3) return;
+  const [p0, p1, p2] = obs.corners;
+  // 第 4 角 = p0 + (p2 - p1)
+  const p3 = { lon: p0.lon + (p2.lon - p1.lon), lat: p0.lat + (p2.lat - p1.lat) };
+  const baseAlt = Math.min(p0.alt, p1.alt, p2.alt);
+  const ring = [
+    wgs84ToCartesian3(p0.lon, p0.lat, baseAlt),
+    wgs84ToCartesian3(p1.lon, p1.lat, baseAlt),
+    wgs84ToCartesian3(p2.lon, p2.lat, baseAlt),
+    wgs84ToCartesian3(p3.lon, p3.lat, baseAlt),
+  ];
+  ds.entities.add({
+    name: `ov-layer-obstacle-${obs.id}`,
+    polygon: {
+      hierarchy: new Cesium.PolygonHierarchy(ring),
+      extrudedHeight: baseAlt + obs.height,
+      height: baseAlt,
+      material: Cesium.Color.fromCssColorString('#a78bfa').withAlpha(0.25),
+      outline: true,
+      outlineColor: Cesium.Color.fromCssColorString('#a78bfa'),
+      perPositionHeight: true,
+    },
+  });
+}
+
+/** 禁飞区：红色虚线多边形 + 半透明填充（高度区间用 extrudedHeight 体现）。 */
+function renderNoFly(ds: Cesium.CustomDataSource, z: OvNoFlyZone): void {
+  if (z.vertices.length < 3) return;
+  const ring = z.vertices.map((v) => wgs84ToCartesian3(v.lon, v.lat, z.minHeight));
+  ds.entities.add({
+    name: `ov-layer-nofly-${z.id}`,
+    polygon: {
+      hierarchy: new Cesium.PolygonHierarchy(ring),
+      extrudedHeight: z.maxHeight,
+      height: z.minHeight,
+      material: Cesium.Color.fromCssColorString('#ef4444').withAlpha(0.15),
+      outline: true,
+      outlineColor: Cesium.Color.fromCssColorString('#ef4444'),
+      perPositionHeight: true,
+    },
+  });
 }
 
 /**

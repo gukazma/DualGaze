@@ -15,6 +15,7 @@ import { OrbitPicker } from './features/orbit/OrbitPicker';
 import { OrbitScanRecomputeHost } from './features/orbit/OrbitScanRecomputeHost';
 import { OvLayer } from './features/ov/OvLayer';
 import { OvAoiPickerMount } from './features/ov/OvAoiPickerMount';
+import { OvAuxPickerMount } from './features/ov/OvAuxPickerMount';
 import { OvSamplingHost } from './features/ov/OvSamplingHost';
 import { OvViewGenHost } from './features/ov/OvViewGenHost';
 import { OvViewOptHost } from './features/ov/OvViewOptHost';
@@ -115,6 +116,7 @@ export function App() {
           {isOrbit && <OrbitScanRecomputeHost />}
           {isOv && <OvLayer />}
           {isOv && <OvAoiPickerMount />}
+          {isOv && <OvAuxPickerMount />}
           {isOv && <OvSamplingHost />}
           {isOv && <OvViewGenHost />}
           {isOv && <OvViewOptHost />}

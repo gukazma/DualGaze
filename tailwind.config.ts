@@ -33,6 +33,9 @@ const config: Config = {
           'danger': '#e57373',
           'success': '#7cc78a',
         },
+        // v3.3 OV 用：采样/视角热图 + 状态 badge 配色
+        mint: '#4ade80',             // 完成 / 已配置 绿
+        violet: '#a78bfa',           // 障碍物 紫
         // shadcn 标准命名 (主题切换 / 兼容)
         background: '#0c0d10',
         foreground: '#e8e8e8',

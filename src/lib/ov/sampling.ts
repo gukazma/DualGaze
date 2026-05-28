@@ -18,11 +18,12 @@ import * as Cesium from 'cesium';
 import type {
   OvAoi,
   OvCameraSpec,
+  OvNoFlyZone,
   OvSamplePoint,
   OvSamplingParams,
 } from '../../types/mission';
 import { wgs84ToCartesian3, cartesian3ToWgs84 } from '../coord';
-import { aoiBoundingBox, isAltInRange, isInsideAoi } from './safety';
+import { aoiBoundingBox, isAltInRange, isInsideAnyNoFly, isInsideAoi } from './safety';
 
 export interface SamplingProgress {
   total: number;
@@ -75,6 +76,7 @@ export async function runOvSampling(
   camera: OvCameraSpec,
   onProgress: SamplingProgressCallback,
   isCancelled: () => boolean,
+  noFlyZones: OvNoFlyZone[] = [],
 ): Promise<OvSamplePoint[]> {
   const t0 = performance.now();
   const samples: OvSamplePoint[] = [];
@@ -145,7 +147,8 @@ export async function runOvSampling(
         const wgs = cartesian3ToWgs84(cart);
         if (
           isInsideAoi({ lon: wgs.lon, lat: wgs.lat }, aoi) &&
-          isAltInRange(wgs.alt, sampling)
+          isAltInRange(wgs.alt, sampling) &&
+          !isInsideAnyNoFly({ lon: wgs.lon, lat: wgs.lat }, wgs.alt, noFlyZones)
         ) {
           samples.push({
             id: newSampleId(),

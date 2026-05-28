@@ -20,10 +20,15 @@ interface OvPickerStore {
   aoiState: OvAoiPickerState;
   setAoiState: (s: OvAoiPickerState) => void;
   resetAoi: () => void;
+  /** 障碍/禁飞 picker 累加中的临时点（OvLayer 预览用） */
+  auxPreview: { lon: number; lat: number; alt: number }[];
+  setAuxPreview: (pts: { lon: number; lat: number; alt: number }[]) => void;
 }
 
 export const useOvPickerStore = create<OvPickerStore>((set) => ({
   aoiState: { mode: 'drawing', vertices: [] },
   setAoiState: (aoiState) => set({ aoiState }),
   resetAoi: () => set({ aoiState: { mode: 'drawing', vertices: [] } }),
+  auxPreview: [],
+  setAuxPreview: (auxPreview) => set({ auxPreview }),
 }));
