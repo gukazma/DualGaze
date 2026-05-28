@@ -29,8 +29,16 @@ import { useOvPickerStore } from '../store/ov-picker';
 import { useOvSamplingStore } from '../store/ov-sampling';
 import { useOvViewGenStore } from '../store/ov-viewgen';
 import { useOvViewOptStore } from '../store/ov-viewopt';
+import { useOvPathGenStore } from '../store/ov-pathgen';
 import { OvAoiPicker } from '../features/ov/OvAoiPicker';
-import type { OvCameraSpec, OvDef, OvViewGenParams, OvViewOptParams } from '../types/mission';
+import type {
+  OvCameraSpec,
+  OvDef,
+  OvPathParams,
+  OvSplitParams,
+  OvViewGenParams,
+  OvViewOptParams,
+} from '../types/mission';
 
 type BadgeState = 'pending' | 'configured' | 'computing' | 'done' | 'invalid';
 
@@ -65,6 +73,12 @@ export function OvConfigPanel() {
   const triggerViewOpt = useOvViewOptStore((s) => s.trigger);
   const cancelViewOpt = useOvViewOptStore((s) => s.cancel);
   const resetViewOpt = useOvViewOptStore((s) => s.reset);
+  const updateOvPathParams = useMissionsStore((s) => s.updateOvPathParams);
+  const updateOvSplitParams = useMissionsStore((s) => s.updateOvSplitParams);
+  const pathGenStatus = useOvPathGenStore((s) => s.status);
+  const triggerPath = useOvPathGenStore((s) => s.triggerPath);
+  const triggerSortie = useOvPathGenStore((s) => s.triggerSortie);
+  const resetPathGen = useOvPathGenStore((s) => s.reset);
 
   if (!mission || mission.type !== 'ov' || !mission.ov) return null;
   const ov = mission.ov;
@@ -137,6 +151,25 @@ export function OvConfigPanel() {
   };
   const setOptMethod = (method: OvViewOptParams['method']): void => {
     updateOvViewOptParams({ method });
+  };
+
+  const viewsReadyForPath = (ov.selectedViews?.length ?? 0) > 0 || candidateCount > 0;
+  const pathsReady = (ov.paths?.length ?? 0) > 0;
+  const sortieCount = ov.paths?.length ?? 0;
+  const totalPathWaypoints = ov.paths?.reduce((a, s) => a + s.waypoints.length, 0) ?? 0;
+  const handleGenPath = (): void => {
+    resetPathGen();
+    triggerPath();
+  };
+  const handleSplitSorties = (): void => {
+    resetPathGen();
+    triggerSortie();
+  };
+  const setSplitMode = (splitMode: OvPathParams['splitMode']): void => {
+    updateOvPathParams({ splitMode });
+  };
+  const setSortieStrategy = (strategy: OvSplitParams['strategy']): void => {
+    updateOvSplitParams({ strategy });
   };
 
   return (
@@ -511,12 +544,100 @@ export function OvConfigPanel() {
 
       {/* M34 · 6 路径生成 */}
       <Card icon={<RouteIcon className="h-3 w-3 text-accent" />} title="6 路径生成" badge={stage6Badge}>
-        <Placeholder text="M34 · 待实施" detail="5 种区域分割 · TSP NN+2-opt · 4 代价" />
+        <SectionLabel>分区模式</SectionLabel>
+        <div className="flex flex-wrap gap-1">
+          <VariantChip label="聚类" on={ov.pathParams.splitMode === 'cluster'} onClick={() => setSplitMode('cluster')} />
+          <VariantChip label="高度优先" on={ov.pathParams.splitMode === 'altPriority'} onClick={() => setSplitMode('altPriority')} />
+          <VariantChip label="视角优先" on={ov.pathParams.splitMode === 'viewPriority'} onClick={() => setSplitMode('viewPriority')} />
+          <VariantChip label="固定高度" on={ov.pathParams.splitMode === 'fixedAlt'} onClick={() => setSplitMode('fixedAlt')} />
+          <VariantChip label="视角分割" on={ov.pathParams.splitMode === 'viewSplit'} onClick={() => setSplitMode('viewSplit')} />
+        </div>
+        <Row label="区域数">
+          <NumField value={ov.pathParams.regionCount} unit="" step={1} min={1} max={16} onChange={(v) => updateOvPathParams({ regionCount: v })} />
+        </Row>
+        <SectionLabel>TSP 4 代价</SectionLabel>
+        <Row label="水平距离">
+          <NumField value={ov.pathParams.costH} unit="" step={1} min={0} max={20} onChange={(v) => updateOvPathParams({ costH: v })} />
+        </Row>
+        <Row label="垂直距离">
+          <NumField value={ov.pathParams.costV} unit="" step={1} min={0} max={20} onChange={(v) => updateOvPathParams({ costV: v })} />
+        </Row>
+        <Row label="水平旋角">
+          <NumField value={ov.pathParams.costHRot} unit="" step={1} min={0} max={20} onChange={(v) => updateOvPathParams({ costHRot: v })} />
+        </Row>
+        <Row label="垂直旋角">
+          <NumField value={ov.pathParams.costVRot} unit="" step={1} min={0} max={20} onChange={(v) => updateOvPathParams({ costVRot: v })} />
+        </Row>
+        {pathsReady && (
+          <div className="flex items-center justify-between rounded border border-mint/30 bg-[#0e2920] px-2 py-1.5">
+            <span className="text-[11px] text-mint">✓ {sortieCount} 区域 · {totalPathWaypoints} 航点</span>
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={handleGenPath}
+          disabled={!viewsReadyForPath || pathGenStatus === 'running'}
+          className={cn(
+            'flex items-center justify-center gap-1.5 rounded border px-2 py-1.5 text-[11px] font-semibold',
+            viewsReadyForPath && pathGenStatus !== 'running'
+              ? 'border-accent bg-[#2a2113] text-accent hover:bg-[#3a2f0d]'
+              : 'border-border bg-bg-input text-text-muted opacity-60',
+          )}
+        >
+          {pathGenStatus === 'running' ? '运行中...' : pathsReady ? '▶ 重新生成路径' : viewsReadyForPath ? '▶ 生成路径' : '需先生成视角'}
+        </button>
+        <div className="text-[10px] text-text-muted">区域分割 + TSP NN+2-opt</div>
       </Card>
 
       {/* M34b · 7 分架次 */}
       <Card icon={<Boxes className="h-3 w-3 text-accent" />} title="7 分架次" badge={stage7Badge}>
-        <Placeholder text="M34b · 待实施" detail="数量 / 长度 / 奇偶 · 增高 · 删除相近点" />
+        <SectionLabel>分割策略</SectionLabel>
+        <div className="flex gap-1.5">
+          <VariantChip label="数量" on={ov.splitParams.strategy === 'count'} onClick={() => setSortieStrategy('count')} />
+          <VariantChip label="长度" on={ov.splitParams.strategy === 'length'} onClick={() => setSortieStrategy('length')} />
+          <VariantChip label="奇偶" on={ov.splitParams.strategy === 'parity'} onClick={() => setSortieStrategy('parity')} />
+        </div>
+        {ov.splitParams.strategy === 'count' && (
+          <Row label="每架次航点数">
+            <NumField value={ov.splitParams.perSortieCount} unit="" step={10} min={5} max={500} onChange={(v) => updateOvSplitParams({ perSortieCount: v })} />
+          </Row>
+        )}
+        {ov.splitParams.strategy === 'length' && (
+          <Row label="每架次长度">
+            <NumField value={ov.splitParams.perSortieLengthM} unit="m" step={100} min={100} max={10000} onChange={(v) => updateOvSplitParams({ perSortieLengthM: v })} />
+          </Row>
+        )}
+        <Row label="进出航线增高">
+          <NumField value={ov.splitParams.transitHeight} unit="m" step={10} min={0} max={300} onChange={(v) => updateOvSplitParams({ transitHeight: v })} />
+        </Row>
+        <Row label="删除相近点">
+          <NumField value={ov.splitParams.removeNearM} unit="m" step={0.5} min={0} max={20} onChange={(v) => updateOvSplitParams({ removeNearM: v })} />
+        </Row>
+        {pathsReady && (
+          <div className="flex flex-col gap-1 rounded border border-mint/30 bg-[#0e2920] px-2 py-1.5">
+            <span className="text-[11px] font-semibold text-mint">{sortieCount} 架次 · {totalPathWaypoints} 航点</span>
+            {ov.paths!.slice(0, 6).map((s, i) => (
+              <div key={s.id} className="flex items-center gap-2">
+                <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: s.color }} />
+                <span className="font-mono text-[10px] text-text-secondary">架次 {i + 1} · {s.waypoints.length} wp</span>
+              </div>
+            ))}
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={handleSplitSorties}
+          disabled={!pathsReady || pathGenStatus === 'running'}
+          className={cn(
+            'flex items-center justify-center gap-1.5 rounded border px-2 py-1.5 text-[11px] font-semibold',
+            pathsReady && pathGenStatus !== 'running'
+              ? 'border-accent bg-[#2a2113] text-accent hover:bg-[#3a2f0d]'
+              : 'border-border bg-bg-input text-text-muted opacity-60',
+          )}
+        >
+          {pathGenStatus === 'running' ? '运行中...' : pathsReady ? '▶ 分架次' : '需先生成路径'}
+        </button>
+        <div className="text-[10px] text-text-muted">按电池限制切分 + 进出航线增高避障</div>
       </Card>
 
       {/* M36/M37 · 8 模拟&导出 */}

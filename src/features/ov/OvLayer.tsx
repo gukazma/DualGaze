@@ -4,7 +4,7 @@ import { useCesiumViewer } from '../cesium/CesiumContext';
 import { useCurrentMission } from '../../store/missions';
 import { useOvPickerStore } from '../../store/ov-picker';
 import { wgs84ToCartesian3 } from '../../lib/coord';
-import type { OvAoi, OvSamplePoint, OvViewCandidate } from '../../types/mission';
+import type { OvAoi, OvSamplePoint, OvSortie, OvViewCandidate } from '../../types/mission';
 
 /** 候选视角箭头渲染上限，防止上万个 polyline 卡顿 */
 const MAX_VIEW_ARROWS = 1500;
@@ -109,12 +109,16 @@ export function OvLayer() {
       renderSamples(ds, mission.ov.samples);
     }
 
-    // 4. 候选视角箭头（M32）。selectedViews 优先；否则画 candidateViews
-    const views = mission.ov.selectedViews?.length
-      ? mission.ov.selectedViews
-      : mission.ov.candidateViews;
-    if (views && views.length > 0 && mission.ov.samples) {
-      renderViews(ds, views, mission.ov.samples);
+    // 4. 路径优先：有 paths 画多架次航线折线；否则画候选/已选视角箭头
+    if (mission.ov.paths && mission.ov.paths.length > 0) {
+      renderPaths(ds, mission.ov.paths);
+    } else {
+      const views = mission.ov.selectedViews?.length
+        ? mission.ov.selectedViews
+        : mission.ov.candidateViews;
+      if (views && views.length > 0 && mission.ov.samples) {
+        renderViews(ds, views, mission.ov.samples);
+      }
     }
   }, [ds, mission, aoiPickerState]);
 
@@ -227,6 +231,61 @@ function renderViews(
       },
     });
   }
+}
+
+/**
+ * 多架次航线折线：每架次按其颜色画连线 + 起点大点 + 中间航点小点。
+ */
+function renderPaths(ds: Cesium.CustomDataSource, paths: OvSortie[]): void {
+  paths.forEach((sortie, si) => {
+    if (sortie.waypoints.length === 0) return;
+    const color = Cesium.Color.fromCssColorString(sortie.color);
+    const positions = sortie.waypoints.map((w) => wgs84ToCartesian3(w.lon, w.lat, w.alt));
+    if (positions.length >= 2) {
+      ds.entities.add({
+        name: `ov-layer-path-${si}`,
+        polyline: {
+          positions,
+          width: 2,
+          material: color,
+          arcType: Cesium.ArcType.NONE,
+        },
+      });
+    }
+    // 起点大点
+    ds.entities.add({
+      name: `ov-layer-path-${si}-start`,
+      position: positions[0],
+      point: {
+        pixelSize: 9,
+        color,
+        outlineColor: Cesium.Color.fromCssColorString('#0c0d10'),
+        outlineWidth: 1,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+      label: {
+        text: `架次 ${si + 1}`,
+        font: '10px Inter',
+        fillColor: color,
+        showBackground: true,
+        backgroundColor: Cesium.Color.fromCssColorString('#0c0d10').withAlpha(0.7),
+        pixelOffset: new Cesium.Cartesian2(0, -16),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    });
+    // 中间航点小点
+    for (let i = 1; i < positions.length; i++) {
+      ds.entities.add({
+        name: `ov-layer-path-${si}-wp-${i}`,
+        position: positions[i],
+        point: {
+          pixelSize: 4,
+          color,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+      });
+    }
+  });
 }
 
 /**
