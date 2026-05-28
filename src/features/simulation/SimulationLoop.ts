@@ -123,6 +123,13 @@ export function effectiveWaypoints(mission: Mission): Waypoint[] {
   if (mission.type === 'orbit') {
     return (mission.orbit?.scanPath ?? []).map((wp, idx) => ({ ...wp, index: idx }));
   }
+  if (mission.type === 'ov') {
+    // ov：所有架次 waypoints 顺序拼接（模拟飞行走完整套；KMZ 导出按架次分 Folder）
+    const paths = mission.ov?.paths ?? [];
+    return paths
+      .flatMap((s) => s.waypoints)
+      .map((wp, idx) => ({ ...wp, index: idx }));
+  }
   if (mission.type === 'facade') {
     // 对齐 DPGO：1 face = 1 wayline = 1 架次。模拟飞行 / 段时序 / sim 入口 disabled
     // 判定都基于 activeFaceId 那一面，不再 concat 所有 face。

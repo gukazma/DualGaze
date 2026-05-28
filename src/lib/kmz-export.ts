@@ -35,7 +35,7 @@ import {
  */
 function hasMissionTakeOff(mission: Mission): boolean {
   return (
-    (mission.type === 'facade' || mission.type === 'orbit') &&
+    (mission.type === 'facade' || mission.type === 'orbit' || mission.type === 'ov') &&
     !!mission.takeOffPoint
   );
 }
@@ -68,6 +68,10 @@ interface WaylineSegment {
   faceParamsJson?: string;
   /** 仅 orbit 有；OrbitDef JSON（含 axis / radius / params），让 round-trip 还原几何 */
   orbitDefJson?: string;
+  /** 仅 ov 有（且仅首架次）；OvDef spec JSON（AOI + 各 params + obstacles + noFly），不含重产物 */
+  ovSpecJson?: string;
+  /** 仅 ov 有；架次染色，round-trip 还原 sortie.color */
+  ovSortieColor?: string;
   waypoints: Waypoint[];
 }
 
@@ -108,6 +112,35 @@ function buildWaylineSegments(mission: Mission): WaylineSegment[] {
       },
     ];
   }
+  if (mission.type === 'ov') {
+    const ov = mission.ov;
+    const paths = ov?.paths ?? [];
+    // OvDef spec —— 只存参数 + AOI + obstacles + noFly（不存 samples/views/visibility 重产物）
+    const specJson = ov
+      ? JSON.stringify({
+          aoi: ov.aoi,
+          noFlyZones: ov.noFlyZones,
+          insertObstacles: ov.insertObstacles,
+          cameraParams: ov.cameraParams,
+          safetyHull: ov.safetyHull,
+          samplingParams: ov.samplingParams,
+          viewGenParams: ov.viewGenParams,
+          viewOptParams: ov.viewOptParams,
+          pathParams: ov.pathParams,
+          splitParams: ov.splitParams,
+        })
+      : undefined;
+    if (paths.length === 0) {
+      // 还没出路径 → 1 个空段，仍写 spec 让 import 还原参数
+      return [{ waylineId: 0, waypoints: [], ovSpecJson: specJson }];
+    }
+    return paths.map((sortie, i) => ({
+      waylineId: i,
+      waypoints: sortie.waypoints.map(reindex),
+      ovSortieColor: sortie.color,
+      ovSpecJson: i === 0 ? specJson : undefined, // spec 只写首架次
+    }));
+  }
   return [{ waylineId: 0, waypoints: mission.waypoints.map(reindex) }];
 }
 
@@ -124,6 +157,18 @@ function xmlEscape(s: string | undefined): string {
 function orbitMetaXml(seg: WaylineSegment): string {
   if (!seg.orbitDefJson) return '';
   return `\n      <wpml:dualgazeOrbitDef>${xmlEscape(seg.orbitDefJson)}</wpml:dualgazeOrbitDef>`;
+}
+
+/** 给 ov Folder 序列化 OvDef spec JSON（首架次）+ 架次颜色 —— 让 import 还原参数 */
+function ovMetaXml(seg: WaylineSegment): string {
+  let out = '';
+  if (seg.ovSpecJson) {
+    out += `\n      <wpml:dualgazeOvSpec>${xmlEscape(seg.ovSpecJson)}</wpml:dualgazeOvSpec>`;
+  }
+  if (seg.ovSortieColor) {
+    out += `\n      <wpml:dualgazeOvSortieColor>${xmlEscape(seg.ovSortieColor)}</wpml:dualgazeOvSortieColor>`;
+  }
+  return out;
 }
 
 /** 给 facade Folder 序列化 face 元数据（id/name/4 角点/params JSON）—— 让 import lossless 还原 */
@@ -207,7 +252,7 @@ function buildTemplateFolder(
   polygonPlacemarkXml: string,
   scanParamsXml: string,
 ): string {
-  const faceMetaXml = facadeFaceMetaXml(seg) + orbitMetaXml(seg);
+  const faceMetaXml = facadeFaceMetaXml(seg) + orbitMetaXml(seg) + ovMetaXml(seg);
   const takeOffPointXml = buildTakeOffPointXml(mission, seg);
   return `    <Folder>
       <wpml:templateType>waypoint</wpml:templateType>
@@ -314,7 +359,7 @@ function buildWaylineFolder(
     mission.globalSpeed > 0
       ? Math.round(parseFloat(distance) / mission.globalSpeed)
       : 0;
-  const faceMetaXml = facadeFaceMetaXml(seg) + orbitMetaXml(seg);
+  const faceMetaXml = facadeFaceMetaXml(seg) + orbitMetaXml(seg) + ovMetaXml(seg);
   const takeOffPointXml = buildTakeOffPointXml(mission, seg);
   const placemarks = seg.waypoints
     .map((wp, i, all) =>

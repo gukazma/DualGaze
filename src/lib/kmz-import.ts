@@ -32,6 +32,8 @@ import {
   type Mission,
   type MissionType,
   type OrbitDef,
+  type OvDef,
+  type OvSortie,
   type PolygonVertex,
   type RCLostAction,
   type Waypoint,
@@ -112,8 +114,9 @@ export async function importKmzToMission(file: File): Promise<KmzImportResult> {
   const polygon = parsePolygonFromDoc(doc);
   const scanParams = parseScanParamsFromDoc(doc);
   const isOrbit = declaredType === 'orbit';
+  const isOv = declaredType === 'ov';
   const isMapping =
-    !isOrbit && (declaredType === 'mapping' || (declaredType !== 'facade' && polygon.length >= 3));
+    !isOrbit && !isOv && (declaredType === 'mapping' || (declaredType !== 'facade' && polygon.length >= 3));
   const isFacade = declaredType === 'facade';
 
   // DualGaze 自定义字段（lossless round-trip）
@@ -134,11 +137,13 @@ export async function importKmzToMission(file: File): Promise<KmzImportResult> {
   // 构建 mission
   const missionType: MissionType = isOrbit
     ? 'orbit'
-    : isFacade
-      ? 'facade'
-      : isMapping
-        ? 'mapping'
-        : 'patrol';
+    : isOv
+      ? 'ov'
+      : isFacade
+        ? 'facade'
+        : isMapping
+          ? 'mapping'
+          : 'patrol';
   const baseMission = createBlankMission({
     name: deriveMissionName(file.name),
     type: missionType,
@@ -163,13 +168,13 @@ export async function importKmzToMission(file: File): Promise<KmzImportResult> {
     mission.scanParams = scanParams ?? { ...MAPPING_DEFAULTS };
   }
 
-  // 写 takeOffPoint（facade / orbit + relative 时有效）
+  // 写 takeOffPoint（facade / orbit / ov + relative 时有效）
+  const takeoffApplicable =
+    missionType === 'facade' || missionType === 'orbit' || missionType === 'ov';
   const useRelative =
-    (missionType === 'facade' || missionType === 'orbit') &&
-    heightMode === 'relativeToStartPoint' &&
-    takeOffPoint !== null;
+    takeoffApplicable && heightMode === 'relativeToStartPoint' && takeOffPoint !== null;
   const altOffset = useRelative ? takeOffPoint!.height : 0;
-  if (takeOffPoint && (missionType === 'facade' || missionType === 'orbit')) {
+  if (takeOffPoint && takeoffApplicable) {
     mission.takeOffPoint = {
       lon: takeOffPoint.longitude,
       lat: takeOffPoint.latitude,
@@ -197,6 +202,63 @@ export async function importKmzToMission(file: File): Promise<KmzImportResult> {
       orbit = { ...orbit, scanPath: importedPath };
     }
     mission.orbit = orbit ?? undefined;
+    mission.waypoints = [];
+    mission.updatedAt = Date.now();
+    return { mission, warnings };
+  }
+
+  if (isOv) {
+    // ov 多架次：dualgazeOvSpec JSON 还原参数 + AOI + obstacles + noFly；
+    // 每个顶层 Folder = 1 sortie，Placemark → waypoints（直接还原航线，不重算）。
+    // samples / candidateViews / selectedViews / visibility 是重产物，不持久化，import 后为空。
+    const specJson =
+      folders.map((f) => readText(f, 'wpml:dualgazeOvSpec')).find((t) => t !== null) ?? null;
+    const spec = parseOvSpec(specJson);
+    if (!spec) {
+      warnings.push('未找到 dualgazeOvSpec JSON，OV 参数回退默认值');
+    }
+    const baseOv = mission.ov; // createBlankMission('ov') 已建好默认 OvDef
+    if (baseOv && spec) {
+      mission.ov = {
+        ...baseOv,
+        ...spec,
+        // 子对象 merge 防止 spec 缺字段
+        cameraParams: { ...baseOv.cameraParams, ...(spec.cameraParams ?? {}) },
+        safetyHull: { ...baseOv.safetyHull, ...(spec.safetyHull ?? {}) },
+        samplingParams: { ...baseOv.samplingParams, ...(spec.samplingParams ?? {}) },
+        viewGenParams: { ...baseOv.viewGenParams, ...(spec.viewGenParams ?? {}) },
+        viewOptParams: { ...baseOv.viewOptParams, ...(spec.viewOptParams ?? {}) },
+        pathParams: { ...baseOv.pathParams, ...(spec.pathParams ?? {}) },
+        splitParams: { ...baseOv.splitParams, ...(spec.splitParams ?? {}) },
+        noFlyZones: Array.isArray(spec.noFlyZones) ? spec.noFlyZones : [],
+        insertObstacles: Array.isArray(spec.insertObstacles) ? spec.insertObstacles : [],
+        // 重产物清空
+        samples: undefined,
+        candidateViews: undefined,
+        selectedViews: undefined,
+        visibility: undefined,
+      };
+    }
+    // 从各 Folder 还原 sorties（每 Folder = 1 架次）
+    const sorties: OvSortie[] = [];
+    folders.forEach((fld, fi) => {
+      const color = readText(fld, 'wpml:dualgazeOvSortieColor') ?? sortieFallbackColor(fi);
+      const fldPlacemarks = Array.from(fld.children).filter((c) => c.tagName === 'Placemark');
+      const wps = parseWaypointsFromPlacemarks(
+        fldPlacemarks,
+        mission.globalSpeed,
+        mission.globalAction,
+        warnings,
+        altOffset,
+      );
+      if (wps.length > 0) {
+        wps.forEach((w) => {
+          w.gimbalYaw = w.heading; // OV waypoint gimbalYaw 跟 heading
+        });
+        sorties.push({ id: `sortie-import-${fi}`, color, waypoints: wps });
+      }
+    });
+    if (mission.ov) mission.ov.paths = sorties.length > 0 ? sorties : undefined;
     mission.waypoints = [];
     mission.updatedAt = Date.now();
     return { mission, warnings };
@@ -381,6 +443,30 @@ function parseOrbitDef(text: string | null): OrbitDef | null {
   } catch {
     return null;
   }
+}
+
+/** 解析 OvDef spec JSON（导出时 stringify 的参数子集）—— 失败返回 null。 */
+function parseOvSpec(text: string | null): Partial<OvDef> | null {
+  if (!text) return null;
+  try {
+    return JSON.parse(text) as Partial<OvDef>;
+  } catch {
+    return null;
+  }
+}
+
+const OV_SORTIE_FALLBACK_COLORS = [
+  '#38bdf8',
+  '#ef4444',
+  '#4ade80',
+  '#ffd24a',
+  '#a78bfa',
+  '#ff6b35',
+  '#22d3ee',
+  '#f472b6',
+];
+function sortieFallbackColor(i: number): string {
+  return OV_SORTIE_FALLBACK_COLORS[i % OV_SORTIE_FALLBACK_COLORS.length];
 }
 
 // ===== mapping 辅助 =====
