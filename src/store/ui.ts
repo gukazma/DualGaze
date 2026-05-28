@@ -24,7 +24,8 @@ export type PickerMode =
   | 'ov-obstacle-pick'
   | 'ov-nofly-pick'
   | 'ov-sweep-pick'
-  | 'ov-spot-orbit-pick';
+  | 'ov-spot-orbit-pick'
+  | 'ov-measure-pick';
 
 interface UiState {
   createModalOpen: boolean;

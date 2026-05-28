@@ -164,6 +164,8 @@ interface MissionsState {
   updateOvPathParams: (patch: Partial<OvPathParams>) => void;
   /** 更新分架次参数（失效 paths 中的 sortie 划分） */
   updateOvSplitParams: (patch: Partial<OvSplitParams>) => void;
+  /** 追加 1 个补拍架次（平扫 / 环拍）到 ov.paths 末尾 */
+  appendOvSortie: (sortie: OvSortie) => void;
   /** Host 算完后写回 samples / views / paths / visibility */
   setOvSamples: (samples: OvSamplePoint[] | undefined) => void;
   setOvCandidateViews: (views: OvViewCandidate[] | undefined) => void;
@@ -766,6 +768,12 @@ export const useMissionsStore = create<MissionsState>()(
                 'paths',
               ),
             };
+          }),
+
+        appendOvSortie: (sortie) =>
+          updCurrent((m) => {
+            if (m.type !== 'ov' || !m.ov) return m;
+            return { ...m, ov: { ...m.ov, paths: [...(m.ov.paths ?? []), sortie] } };
           }),
 
         setOvSamples: (samples) =>

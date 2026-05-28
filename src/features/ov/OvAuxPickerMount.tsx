@@ -2,7 +2,15 @@ import { useEffect, useRef } from 'react';
 import { useCesiumViewer } from '../cesium/CesiumContext';
 import { useUiStore } from '../../store/ui';
 import { useOvPickerStore } from '../../store/ov-picker';
-import { OvAuxPicker } from './OvAuxPickers';
+import { OvAuxPicker, type AuxPickKind } from './OvAuxPickers';
+
+const MODE_TO_KIND: Record<string, AuxPickKind> = {
+  'ov-obstacle-pick': 'obstacle',
+  'ov-nofly-pick': 'nofly',
+  'ov-sweep-pick': 'sweep',
+  'ov-spot-orbit-pick': 'spotOrbit',
+  'ov-measure-pick': 'measure',
+};
 
 /**
  * 障碍物 / 禁飞区 picker 挂载点。pickerMode === 'ov-obstacle-pick' / 'ov-nofly-pick' 时挂载。
@@ -16,12 +24,7 @@ export function OvAuxPickerMount() {
 
   useEffect(() => {
     if (!viewer || viewer.isDestroyed()) return;
-    const kind =
-      pickerMode === 'ov-obstacle-pick'
-        ? 'obstacle'
-        : pickerMode === 'ov-nofly-pick'
-          ? 'nofly'
-          : null;
+    const kind = MODE_TO_KIND[pickerMode] ?? null;
     if (!kind) {
       if (pickerRef.current) {
         pickerRef.current.destroy();

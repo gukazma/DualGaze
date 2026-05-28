@@ -31,6 +31,8 @@ import { useOvViewGenStore } from '../store/ov-viewgen';
 import { useOvViewOptStore } from '../store/ov-viewopt';
 import { useOvPathGenStore } from '../store/ov-pathgen';
 import { useOvDisplayStore, type OvDisplayKey } from '../store/ov-display';
+import { useOvMeasureStore } from '../store/ov-measure';
+import type { MeasureMode } from '../lib/ov/measure';
 import { OvAoiPicker } from '../features/ov/OvAoiPicker';
 import type {
   OvCameraSpec,
@@ -209,6 +211,13 @@ export function OvConfigPanel() {
   const isPickingNoFly = pickerMode === 'ov-nofly-pick';
   const obstacleCount = ov.insertObstacles.length;
   const noFlyCount = ov.noFlyZones.length;
+
+  const isPickingSweep = pickerMode === 'ov-sweep-pick';
+  const isPickingSpotOrbit = pickerMode === 'ov-spot-orbit-pick';
+  const isPickingMeasure = pickerMode === 'ov-measure-pick';
+  const measureMode = useOvMeasureStore((s) => s.mode);
+  const measureReadoutText = useOvMeasureStore((s) => s.readout);
+  const setMeasureMode = (m: MeasureMode): void => useOvMeasureStore.getState().setMode(m);
 
   return (
     <div className="flex flex-col gap-2.5">
@@ -766,6 +775,45 @@ export function OvConfigPanel() {
           <button type="button" onClick={cleanSamples} className="rounded border border-border bg-bg-input px-2 py-1 text-[10px] text-text-secondary hover:border-accent-danger hover:text-accent-danger">清采样</button>
           <button type="button" onClick={cleanAll} className="rounded border border-accent-danger/40 bg-[#1a0d0d] px-2 py-1 text-[10px] font-semibold text-accent-danger hover:bg-[#2a1010]">全部重置</button>
         </div>
+
+        <SectionLabel>补拍工具</SectionLabel>
+        <div className="flex gap-1.5">
+          <button
+            type="button"
+            onClick={() => setPickerMode(isPickingSweep ? 'idle' : 'ov-sweep-pick')}
+            className={cn('flex-1 rounded border px-2 py-1 text-[10px] font-semibold', isPickingSweep ? 'border-accent-cyan bg-[#0a2b3c] text-accent-cyan' : 'border-border bg-bg-input text-text-secondary hover:border-accent-cyan')}
+          >
+            {isPickingSweep ? '双击 2 点' : '平扫航线'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setPickerMode(isPickingSpotOrbit ? 'idle' : 'ov-spot-orbit-pick')}
+            className={cn('flex-1 rounded border px-2 py-1 text-[10px] font-semibold', isPickingSpotOrbit ? 'border-accent bg-[#2a2113] text-accent' : 'border-border bg-bg-input text-text-secondary hover:border-accent')}
+          >
+            {isPickingSpotOrbit ? '点圆心' : '单点环拍'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setPickerMode(isPickingMeasure ? 'idle' : 'ov-measure-pick')}
+            className={cn('flex-1 rounded border px-2 py-1 text-[10px] font-semibold', isPickingMeasure ? 'border-mint bg-[#0e2920] text-mint' : 'border-border bg-bg-input text-text-secondary hover:border-mint')}
+          >
+            {isPickingMeasure ? '量取中…' : '量取'}
+          </button>
+        </div>
+        {isPickingMeasure && (
+          <div className="flex flex-col gap-1.5 rounded border border-mint/30 bg-[#0e2920] px-2 py-1.5">
+            <div className="flex flex-wrap gap-1">
+              <VariantChip label="量高" on={measureMode === 'height'} onClick={() => setMeasureMode('height')} />
+              <VariantChip label="2D" on={measureMode === 'dist2d'} onClick={() => setMeasureMode('dist2d')} />
+              <VariantChip label="3D" on={measureMode === 'dist3d'} onClick={() => setMeasureMode('dist3d')} />
+              <VariantChip label="量面" on={measureMode === 'area'} onClick={() => setMeasureMode('area')} />
+            </div>
+            <span className="font-mono text-[11px] font-semibold text-mint">
+              {measureReadoutText ?? '点击模型取点…（Esc 退出）'}
+            </span>
+          </div>
+        )}
+        <div className="text-[10px] text-text-muted">平扫补底部 · 环拍补单点 · 补拍架次会被重新生成路径覆盖</div>
       </Card>
     </div>
   );
