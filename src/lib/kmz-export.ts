@@ -490,8 +490,8 @@ function buildTakeOffPointXml(mission: Mission, seg: WaylineSegment): string {
         <wpml:height>${t.alt}</wpml:height>
       </wpml:takeOffPoint>`;
   }
-  // facade / orbit 没设 takeOffPoint → 不写 takeOff XML，避免 import 端把 wp.alt 错误回算。
-  if (mission.type === 'facade' || mission.type === 'orbit') return '';
+  // facade / orbit / ov 没设 takeOffPoint → 不写 takeOff XML，避免 import 端把 wp.alt 错误回算。
+  if (mission.type === 'facade' || mission.type === 'orbit' || mission.type === 'ov') return '';
   // patrol / mapping：保留旧逻辑兜底（heightMode != WGS84 时取该架次首点当 anchor）。
   // 这套数据 round-trip 不是完全对称的（wp.alt 翻倍），但 DJI Pilot 2 端语义 OK。
   // 修这个 v1 历史 bug 不在 v3.2 范围内。

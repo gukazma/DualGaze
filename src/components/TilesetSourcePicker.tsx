@@ -37,8 +37,12 @@ export function TilesetSourcePicker({ variant = 'panel' }: { variant?: Variant }
   );
   const dirInputRef = useRef<HTMLInputElement>(null);
 
-  // facade + orbit 都需要 tileset
-  if (!mission || (mission.type !== 'facade' && mission.type !== 'orbit')) return null;
+  // facade + orbit + ov 都需要 tileset
+  if (
+    !mission ||
+    (mission.type !== 'facade' && mission.type !== 'orbit' && mission.type !== 'ov')
+  )
+    return null;
 
   const doProbe = async (): Promise<void> => {
     if (!url.trim()) {

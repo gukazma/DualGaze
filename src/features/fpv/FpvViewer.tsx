@@ -79,9 +79,9 @@ export function FpvViewer() {
   }, []);
 
   // 加载 facade tileset 到 FPV scene（独立于主 viewer）—— 否则 FPV 看不到 3DTiles 模型
-  // facade + orbit 都要 tileset 才能在 FPV 看到塔 / 楼
+  // facade + orbit + ov 都要 tileset 才能在 FPV 看到塔 / 楼 / 采集目标
   const tilesetSource =
-    mission?.type === 'facade' || mission?.type === 'orbit'
+    mission?.type === 'facade' || mission?.type === 'orbit' || mission?.type === 'ov'
       ? mission.tilesetSource
       : undefined;
   const sourceKey = tilesetSource

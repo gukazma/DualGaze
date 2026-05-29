@@ -228,6 +228,7 @@ function TakeoffPickerMount() {
     if (
       mission?.type !== 'facade' &&
       mission?.type !== 'orbit' &&
+      mission?.type !== 'ov' &&
       pickerMode === 'takeoff-pick'
     ) {
       setPickerMode('idle');
