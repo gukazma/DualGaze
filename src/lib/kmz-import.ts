@@ -76,14 +76,26 @@ export async function importKmzToMission(file: File): Promise<KmzImportResult> {
   const droneEnum = readNumber(cfg, 'wpml:droneEnumValue');
   const droneSubEnum = readNumber(cfg, 'wpml:droneSubEnumValue');
   const payloadEnum = readNumber(cfg, 'wpml:payloadEnumValue');
-  const droneMatch =
+  // 先按 droneEnum + subEnum 收候选；M3E/M3T/M3M(77) 与 M30/M30T(67) 靠 subEnum 即可区分。
+  const droneCandidates =
     droneEnum !== null
-      ? DRONE_CATALOG.find(
+      ? DRONE_CATALOG.filter(
           (d) =>
             d.droneEnumValue === droneEnum &&
             (droneSubEnum === null || d.droneSubEnumValue === droneSubEnum),
         )
-      : undefined;
+      : [];
+  // M4E/M4T 共用 droneEnumValue=99 且 subEnum 都=0，subEnum 无法区分 → 用 payloadEnumValue 消歧
+  // （88→M4E / 89→M4T）。多候选时优先选 payload 对得上的那个。
+  let droneMatch: (typeof DRONE_CATALOG)[number] | undefined = droneCandidates[0];
+  if (droneCandidates.length > 1 && payloadEnum !== null) {
+    const byPayload = droneCandidates.find((d) =>
+      d.compatiblePayloads.some(
+        (pid) => PAYLOAD_CATALOG.find((p) => p.id === pid)?.payloadEnumValue === payloadEnum,
+      ),
+    );
+    if (byPayload) droneMatch = byPayload;
+  }
   const payloadMatch =
     payloadEnum !== null
       ? PAYLOAD_CATALOG.find((p) => p.payloadEnumValue === payloadEnum)

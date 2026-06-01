@@ -102,6 +102,12 @@ export const DRONE_CATALOG: ReadonlyArray<DroneModel> = [
   { id: 'm30t', label: 'DJI Matrice 30T', droneEnumValue: 67, droneSubEnumValue: 1, compatiblePayloads: ['m30t-cam'] },
   { id: 'm300', label: 'DJI Matrice 300 RTK', droneEnumValue: 60, droneSubEnumValue: 0, compatiblePayloads: ['h20', 'h20t', 'h20n', 'p1', 'l1'] },
   { id: 'm350', label: 'DJI Matrice 350 RTK', droneEnumValue: 89, droneSubEnumValue: 0, compatiblePayloads: ['h20', 'h20t', 'h20n', 'p1', 'l1', 'l2'] },
+  // v3.3 M4 系列：droneEnumValue=99 实测自真实 DJI Pilot 2 wpmz/1.0.6 导出（harpia M4E 2025-05 / LittleOne M4T 2026-02）。
+  // M4E/M4T 共用 drone 99，靠 payloadEnumValue 区分（88=M4E / 89=M4T），同 M30/M30T 模式（非靠 subEnum）。
+  // M4T droneSubEnumValue 在两份实测样本间冲突（0 vs 1），保守取 0，待真实 M4T KMZ 复核。
+  // M4D / M4TD / M400 官方未公开 WPML 枚举、社区值互相矛盾，故不收录（避免产出飞不了的 KMZ）。
+  { id: 'm4e', label: 'DJI Matrice 4E', droneEnumValue: 99, droneSubEnumValue: 0, compatiblePayloads: ['m4e-cam'] },
+  { id: 'm4t', label: 'DJI Matrice 4T', droneEnumValue: 99, droneSubEnumValue: 0, compatiblePayloads: ['m4t-cam'] },
 ];
 
 /**
@@ -121,6 +127,11 @@ export const PAYLOAD_CATALOG: ReadonlyArray<PayloadModel> = [
   { id: 'p1', label: 'P1 测绘相机', payloadEnumValue: 50, payloadPositionIndex: 0, sensorWidthMm: 35.9, sensorHeightMm: 24.0, focalLengthMm: 35, imageWidthPx: 8192, imageHeightPx: 5460 },
   { id: 'l1', label: 'L1 激光雷达', payloadEnumValue: 41, payloadPositionIndex: 0 },
   { id: 'l2', label: 'L2 激光雷达', payloadEnumValue: 90, payloadPositionIndex: 0 },
+  // v3.3 M4 系列相机。payloadEnumValue 实测自真实 Pilot 2 KMZ（88=M4E / 89=M4T）。
+  // M4E 广角 4/3" 20MP 24mm 等效，与 M3E 同光学格式 → GSD 参数镜像 M3E（高置信）。
+  // M4T 主相机 1/1.3" 48MP，精确 sensor mm/focal 无高置信来源 → 不填 GSD 参数，facade 走 manual 模式（避免错算）。
+  { id: 'm4e-cam', label: 'M4E 主云台相机 (4/3 20MP)', payloadEnumValue: 88, payloadPositionIndex: 0, sensorWidthMm: 17.3, sensorHeightMm: 13.0, focalLengthMm: 12.29, imageWidthPx: 5280, imageHeightPx: 3956 },
+  { id: 'm4t-cam', label: 'M4T 主云台相机 (1/1.3 48MP+红外)', payloadEnumValue: 89, payloadPositionIndex: 0 },
 ];
 
 // ---------- Waypoint / Mission ----------
