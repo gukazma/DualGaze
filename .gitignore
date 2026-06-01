@@ -27,6 +27,8 @@ Thumbs.db
 # Playwright (调试用，不入库)
 .playwright-mcp/
 *.png
+# 例外：Tauri 桌面端图标必须入库（bundle.icon 引用，clone 后 tauri build 要用）
+!src-tauri/icons/*.png
 
 # Real-world point cloud data —— Bavaria 工程 P06_PNTS 输出，11.9 MB 一并入库做 demo
 # （想换成自己的数据时把 tileset.json + Tile/ 替换掉即可）
